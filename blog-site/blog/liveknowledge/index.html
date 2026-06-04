@@ -6,11 +6,16 @@
   <title>LiveKnowledge, Part 1: Architecture — Engineering Verifiable Knowledge | Adam Rybinski</title>
   <meta name="description" content="LiveKnowledge closes the loop between unstructured text and structured, verifiable knowledge using LLMs + Answer Set Programming (Clingo). Part 1 covers the v2.1 architecture: LLM-Modulo, CEGIS, the hermeneutic gap lifecycle, and arity-drift as schema evolution.">
   <link rel="canonical" href="https://adamrybinski.com/blog/liveknowledge/">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
   <meta property="og:title" content="LiveKnowledge, Part 1: Architecture — Engineering Verifiable Knowledge">
   <meta property="og:description" content="Closed-loop knowledge engineering with LLMs + ASP. LLM-Modulo framework, CEGIS, gap-driven learning, arity-drift, and the hermeneutic review layer.">
   <meta property="og:url" content="https://adamrybinski.com/blog/liveknowledge/">
+  <meta property="og:image" content="https://adamrybinski.com/liveknowledge.webp">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
   <meta property="og:type" content="article">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://adamrybinski.com/liveknowledge.webp">
   <meta name="twitter:title" content="LiveKnowledge, Part 1: Architecture">
   <meta name="twitter:description" content="Closed-loop knowledge engineering with LLMs + ASP.">
   <style>
@@ -41,12 +46,14 @@
 </head>
 <body>
 
-  <p style="color:#666; font-size:0.9rem; margin-bottom:1.5rem;">Part 1 of a series — <a href="/">Adam Rybinski</a></p>
+  <p style="color:#666; font-size:0.9rem; margin-bottom:1.5rem;">Part 1 of a series — <a href="/">Adam Rybinski</a> &middot; <a href="/work-with-me/"><strong>Work with me</strong></a></p>
 
   <h1>LiveKnowledge: Engineering Verifiable Knowledge</h1>
   <p class="subtitle">Closed-loop knowledge engineering with LLMs + Answer Set Programming</p>
 
-  <p><strong>LiveKnowledge</strong> is a CLI tool that closes the loop between unstructured text and structured, verifiable knowledge. It combines large language models with Answer Set Programming (via <a href="https://potassco.org/clingo/">Clingo</a>) to extract, verify, and query facts in an evolving knowledge base. This post covers the v2.1 architecture — what it does, why it works, and where it sits in the broader neuro-symbolic landscape.</p>
+  <img src="/liveknowledge.webp" alt="LiveKnowledge architecture diagram" style="width:100%; max-width:680px; border-radius:8px; margin:1.5rem 0; border:1px solid #e2e8f0;">
+
+  <p><a href="https://github.com/adamrybinski/LiveKnowledge" style="color:inherit; text-decoration:none; border-bottom:1px dotted #94a3b8;"><strong>LiveKnowledge</strong></a> is a CLI tool that closes the loop between unstructured text and structured, verifiable knowledge. It combines large language models with Answer Set Programming (via <a href="https://potassco.org/clingo/">Clingo</a>) to extract, verify, and query facts in an evolving knowledge base. This post covers the v2.1 architecture — what it does, why it works, and where it sits in the broader neuro-symbolic landscape.</p>
 
   <hr>
 
@@ -243,6 +250,12 @@
 
   <h3>Multi-Shot Stateful Reasoning</h3>
   <p>Right now, every successful integration overwrites the prior snapshot. For real-time streaming agents, the system will adopt Clingo's <strong>multi-shot solving</strong> <a href="#ref-gebser">[8]</a>, maintaining a persistent, stateful reasoning stream that dynamically injects and toggles <code>#program</code> scenarios without ever re-grounding the entire KB.</p>
+
+  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.2rem; margin:1.5rem 0; text-align:center;">
+    <p style="font-size:1rem; font-weight:600; margin-bottom:0.5rem;">Want this kind of system in your stack?</p>
+    <p style="font-size:0.9rem; color:#64748b; margin-bottom:0.8rem;">I help teams build verifiable knowledge layers with ASP, Prolog, and LLM orchestration.</p>
+    <a href="/work-with-me/" style="display:inline-block; background:#2563eb; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem;">Work with me →</a>
+  </div>
 
   <hr>
 
