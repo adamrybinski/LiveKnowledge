@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiveKnowledge, Part 1: Architecture — Engineering Verifiable Knowledge | Adam Rybinski</title>
+  <meta name="description" content="LiveKnowledge closes the loop between unstructured text and structured, verifiable knowledge using LLMs + Answer Set Programming (Clingo). Part 1 covers the v2.1 architecture: LLM-Modulo, CEGIS, the hermeneutic gap lifecycle, and arity-drift as schema evolution.">
+  <link rel="canonical" href="https://adamrybinski.com/blog/liveknowledge/">
+  <meta property="og:title" content="LiveKnowledge, Part 1: Architecture — Engineering Verifiable Knowledge">
+  <meta property="og:description" content="Closed-loop knowledge engineering with LLMs + ASP. LLM-Modulo framework, CEGIS, gap-driven learning, arity-drift, and the hermeneutic review layer.">
+  <meta property="og:url" content="https://adamrybinski.com/blog/liveknowledge/">
+  <meta property="og:type" content="article">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="LiveKnowledge, Part 1: Architecture">
+  <meta name="twitter:description" content="Closed-loop knowledge engineering with LLMs + ASP.">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.8; color: #1a1a1a; font-size: 1.05rem; }
+    @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #e2e8f0; } a { color: #60a5fa; } }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 { font-size: 2rem; margin-bottom: 0.3rem; letter-spacing: -0.02em; }
+    h1 + p.subtitle { color: #666; font-size: 1rem; margin-top: 0.2rem; }
+    h2 { font-size: 1.4rem; margin-top: 3rem; margin-bottom: 0.6rem; }
+    h3 { font-size: 1.15rem; margin-top: 2rem; margin-bottom: 0.4rem; }
+    blockquote { border-left: 3px solid #94a3b8; margin: 1.5rem 0; padding: 0.5rem 1.2rem; color: #64748b; font-style: italic; }
+    @media (prefers-color-scheme: dark) { blockquote { color: #94a3b8; border-color: #475569; } }
+    code { background: #f1f5f9; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+    @media (prefers-color-scheme: dark) { code { background: #1e293b; } }
+    pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2.5rem 0; }
+    ul, ol { padding-left: 1.3rem; margin: 0.8rem 0; }
+    li { margin-bottom: 0.5rem; }
+    .diagram { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0; font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.6; white-space: pre; overflow-x: auto; }
+    @media (prefers-color-scheme: dark) { .diagram { background: #0f172a; border-color: #1e293b; } }
+    .series-tag { display: inline-block; background: #2563eb; color: white; font-size: 0.75rem; font-weight: 600; padding: 0.2em 0.6em; border-radius: 4px; margin-bottom: 0.5rem; }
+    .ref { font-size: 0.88rem; color: #64748b; padding-left: 2em; text-indent: -2em; margin-bottom: 0.6rem; }
+    .ref a { color: #2563eb; }
+    @media (prefers-color-scheme: dark) { .ref a { color: #60a5fa; } }
+    .footer { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-top: 3rem; border-top: 1px solid #e2e8f0; padding-top: 1.5rem; }
+  </style>
+</head>
+<body>
+
+  <p style="color:#666; font-size:0.9rem; margin-bottom:1.5rem;">Part 1 of a series — <a href="/">Adam Rybinski</a></p>
+
+  <h1>LiveKnowledge: Engineering Verifiable Knowledge</h1>
+  <p class="subtitle">Closed-loop knowledge engineering with LLMs + Answer Set Programming</p>
+
+  <p><strong>LiveKnowledge</strong> is a CLI tool that closes the loop between unstructured text and structured, verifiable knowledge. It combines large language models with Answer Set Programming (via <a href="https://potassco.org/clingo/">Clingo</a>) to extract, verify, and query facts in an evolving knowledge base. This post covers the v2.1 architecture — what it does, why it works, and where it sits in the broader neuro-symbolic landscape.</p>
+
+  <hr>
+
+  <h2>The Problem</h2>
+
+  <p>Most knowledge tools treat knowledge as vectors in a database. You can retrieve them, but you cannot <em>check</em> them. If two facts contradict each other, the vector store won't tell you. RAG pipelines can ground generation in retrieved documents, but they have no way of knowing whether the retrieved facts form a consistent logical theory.</p>
+
+  <p>LiveKnowledge treats knowledge as <strong>logic programs</strong> — ASP facts and rules that a solver can verify for consistency. Every integration goes through a <strong>merged-coherence check</strong>: Clingo solves the combined KB + candidate program. If unsatisfiable, the candidate is rejected as contradictory. This is the core invariant: <em>no contradiction ever enters the knowledge base</em>.</p>
+
+  <hr>
+
+  <h2>Architecture: The LLM-Modulo Framework</h2>
+
+  <p>The architecture follows what the literature calls the <strong>LLM-Modulo framework</strong> <a href="#ref-shetye">[1]</a><a href="#ref-ishay">[2]</a>. An LLM proposes candidate knowledge (or candidate answers), but a separate, verifiable module — here, Clingo — acts as an unforgiving mathematical gatekeeper. If the solver finds a contradiction, the candidate is rejected and the LLM must revise.</p>
+
+  <p>This is a direct application of <strong>Counterexample-Guided Inductive Synthesis (CEGIS)</strong> <a href="#ref-orvalho">[3]</a>. The solver produces a counterexample (the unsatisfiable core of the merged program), and the LLM uses that failure trace as a signal for abductive revision. The system doesn't just accept or reject — it explains <em>why</em> and rewrites.</p>
+
+  <div class="diagram">
+┌──────────────────────────────────────────────────────────┐
+│                    answer_question flow                    │
+│                                                          │
+│  question ──► generate (LLM) ──► verify (LLM) ──► D ──► │
+│                                    ▲           │         │
+│                                    │      [rejected]     │
+│                                    │           │         │
+│                                    │     abduce / revise │
+│                                    │◄──────── loop ──────│
+│                                               │          │
+│                                          [verified]       │
+│                                               │          │
+│                                            commit ──►    │
+│                                               final      │
+│                                              answer      │
+└──────────────────────────────────────────────────────────┘
+         │
+         │ gap_rationale (missing predicates)
+         ▼
+┌──────────────────────────────────────────────────────────┐
+│               knowledge_gap_report (JSON)                 │
+│  ┌──────────────────────┐                                │
+│  │ target_predicates     │                                │
+│  │ status: "open"       │──── human review ──► target_review.drop │
+│  │ resolution: null     │                                │
+│  └──────────────────────┘                                │
+└──────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────────────┐
+│                    learn composition                      │
+│                                                          │
+│  source text ──► generate_knowledge (LLM + gap_context)  │
+│                      │                                   │
+│                      ▼                                   │
+│            integrate_knowledge (Clingo verify)            │
+│                      │                                   │
+│                      ▼                                   │
+│                 persist KB to disk                       │
+│                      │                                   │
+│                      ▼                                   │
+│         verify_gap_resolution (deterministic scan)       │
+│                      │                                   │
+│                      ▼                                   │
+│              update gap file (open/closed)               │
+│                      │                                   │
+│                      ▼                                   │
+│            re-ask against augmented KB (optional)         │
+└──────────────────────────────────────────────────────────┘
+  </div>
+
+  <h3>The Loop in Detail</h3>
+
+  <ol>
+    <li><strong>Ask</strong> — a question against the KB. The LLM proposes an answer grounded in the facts.</li>
+    <li><strong>Verify</strong> — the answer is verified against the KB (LLM-backed for textual answers, Clingo-backed for knowledge coherence).</li>
+    <li><strong>Abduce & Revise</strong> — if verification fails, the <code>abductive_revisor</code> generates a hypothesis about the failure and a repair plan, then the candidate is rewritten. This is CEGIS in action <a href="#ref-orvalho">[3]</a>.</li>
+    <li><strong>Gap report</strong> — the committed answer's rationale lists specific predicate signatures (<code>profit/2</code>, <code>demand_cycle/1</code>) that the KB is missing. This heuristic form of abductive knowledge induction is related to <strong>Learning from Answer Sets (LAS)</strong> <a href="#ref-borroto">[4]</a>: the system identifies <em>what is missing to complete a logical theory</em>.</li>
+    <li><strong>Learn</strong> — a source text is fed to the LLM, which extracts facts targeting the exact missing predicates. The gap report is a <strong>prioritisation signal</strong>, not a hard constraint — the LLM must still remain grounded in the source text.</li>
+    <li><strong>Verify coherence</strong> — Clingo checks the merged program (KB ⊕ candidate). If unsatisfiable, the candidate is rejected.</li>
+    <li><strong>Resolve</strong> — a deterministic scan checks whether the targeted predicates now exist in the KB at the correct arity.</li>
+  </ol>
+
+  <hr>
+
+  <h2>Gap Lifecycle: From Heuristics to Resolution</h2>
+
+  <p>The gap report is the bridge between the answer flow and the learning flow. It moves through three layers of interpretation:</p>
+
+  <table style="width:100%; border-collapse: collapse; margin:1rem 0;">
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <th style="text-align:left; padding:0.4rem 0.8rem;">Layer</th>
+      <th style="text-align:left; padding:0.4rem 0.8rem;">Meaning</th>
+      <th style="text-align:left; padding:0.4rem 0.8rem;">Confidence</th>
+    </tr>
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <td style="padding:0.4rem 0.8rem;">Answer gap signal</td>
+      <td style="padding:0.4rem 0.8rem;">"This answer would improve if the KB had X"</td>
+      <td style="padding:0.4rem 0.8rem;">Heuristic, LLM-based</td>
+    </tr>
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <td style="padding:0.4rem 0.8rem;">Learn targeting</td>
+      <td style="padding:0.4rem 0.8rem;">"Prefer extracting facts about X from this source"</td>
+      <td style="padding:0.4rem 0.8rem;">Heuristic but useful</td>
+    </tr>
+    <tr>
+      <td style="padding:0.4rem 0.8rem;">Resolution check</td>
+      <td style="padding:0.4rem 0.8rem;">"Predicate name X now appears in KB text at the correct arity"</td>
+      <td style="padding:0.4rem 0.8rem;">Deterministic, shallow</td>
+    </tr>
+  </table>
+
+  <h3>The Hermeneutic Review</h3>
+
+  <p>Not all gap targets are correct. An LLM might hallucinate a predicate name, or the gap might ask for <code>profit/2</code> when the source text actually supports <code>profit/3</code> (a richer schema). In v2.1, human review is surfaced via <code>target_review.drop</code> — a simple JSON field that lets a human say "this target was wrong, exclude it from resolution."</p>
+
+  <p>I call this the <strong>Hermeneutic Loop</strong>. Clingo can verify whether <code>profit/3</code> is mathematically consistent with the rest of the KB, but only a human knows whether <code>profit/3</code> makes sense for a specific business domain. As Dreyfus argued <a href="#ref-dreyfus">[5]</a>, machines lack the embodied, contextual understanding that humans bring to real-world reasoning. The <code>target_review</code> mechanism is where the <em>Live</em> in LiveKnowledge happens — the machine handles the syntax, the human provides the meaning.</p>
+
+  <h3>Three States of Resolution</h3>
+
+  <p>The resolution check produces three outcomes for any target predicate:</p>
+
+  <table style="width:100%; border-collapse: collapse; margin:1rem 0;">
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <th style="text-align:left; padding:0.4rem 0.8rem;">State</th>
+      <th style="text-align:left; padding:0.4rem 0.8rem;">CLI Output</th>
+      <th style="text-align:left; padding:0.4rem 0.8rem;">Meaning</th>
+    </tr>
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <td style="padding:0.4rem 0.8rem;">Exact match found</td>
+      <td style="padding:0.4rem 0.8rem;"><code>recipe/2 — resolved</code></td>
+      <td style="padding:0.4rem 0.8rem;">Predicate exists at exact arity in KB</td>
+    </tr>
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <td style="padding:0.4rem 0.8rem;">Exact match missing</td>
+      <td style="padding:0.4rem 0.8rem;"><code>profit/2 — exact target missing</code><br>+ <code>related predicate found with different arity: profit/3</code></td>
+      <td style="padding:0.4rem 0.8rem;">Name found, but at a different arity — schema evolution</td>
+    </tr>
+    <tr>
+      <td style="padding:0.4rem 0.8rem;">Dropped by review</td>
+      <td style="padding:0.4rem 0.8rem;"><code>garbage/1 — excluded by review (target_review.drop)</code></td>
+      <td style="padding:0.4rem 0.8rem;">Human excluded it; not treated as unresolved</td>
+    </tr>
+  </table>
+
+  <hr>
+
+  <h2>Arity-Drift as Schema Evolution</h2>
+
+  <p>One of the most interesting emergent properties of the system is <strong>arity-drift detection</strong>. When the resolution check finds <code>profit/3</code> but the gap asked for <code>profit/2</code>, it reports the mismatch rather than silently accepting or rejecting.</p>
+
+  <p>This is not a bug — it's a form of <strong>predicate invention</strong> <a href="#ref-dumancic">[6]</a>. The LLM, presented with a source text that describes profit as a range ("200–500 gold"), naturally extracts the richer <code>profit/3</code> schema (item, low, high) instead of the narrower <code>profit/2</code> the gap report expected. The system surfaces this as a related predicate, giving the human a clear choice:</p>
+
+  <ul>
+    <li><strong>Accept the drift</strong> — drop the old <code>profit/2</code> target and update the question to use <code>profit/3</code></li>
+    <li><strong>Reject the drift</strong> — keep <code>profit/2</code> as unresolved, find a source that matches the expected schema</li>
+  </ul>
+
+  <p>This separation of concerns — the LLM proposes extended schemas, the solver verifies consistency, the human decides on adoption — is exactly what a robust neuro-symbolic pipeline should do.</p>
+
+  <hr>
+
+  <h2>Non-Monotonicity and Why It Matters</h2>
+
+  <p>Vector stores are monotonic: adding more documents can only expand what a retrieval system can find. But knowledge is <strong>non-monotonic</strong> — new facts can invalidate old conclusions. If you learn that a previously trusted supplier is unreliable, the inference "buy from them because they're cheap" should retract, not just be buried under competing evidence.</p>
+
+  <p>Clingo, as an answer set solver, natively supports non-monotonic reasoning via negation-as-failure and <strong>strong negation</strong>. LiveKnowledge's additive-only v2.1 doesn't yet exploit this fully — contradictions cause rejection rather than retraction — but the solver is designed for it. The KB structure is ready for non-monotonic updates: every integration produces a new immutable snapshot, so reverting a change is always possible by loading the prior snapshot.</p>
+
+  <p>The literature on <strong>theory revision</strong> <a href="#ref-dai">[7]</a> shows that abductive knowledge induction from raw data requires exactly this capability — the ability to revise a logical theory when new data contradicts earlier conclusions. This is a v2.2 goal, and the architecture is designed for it.</p>
+
+  <hr>
+
+  <h2>How It Maps to the Literature</h2>
+
+  <p>LiveKnowledge v2.1 sits at the intersection of several research threads:</p>
+
+  <ul>
+    <li><strong>LLM-Modulo Framework</strong> <a href="#ref-shetye">[1]</a><a href="#ref-ishay">[2]</a> — the LLM proposes, the solver verifies. Our <code>abductive_revisor</code> is a direct implementation of CEGIS <a href="#ref-orvalho">[3]</a>, using solver failure traces as revision signals.</li>
+    <li><strong>Learning from Answer Sets (LAS)</strong> <a href="#ref-borroto">[4]</a> — the gap report is a heuristic form of abductive knowledge induction, identifying missing predicates needed to complete a logical theory.</li>
+    <li><strong>Abductive Knowledge Induction</strong> <a href="#ref-dai">[7]</a> — the combined generate→verify→abduce→revise loop mirrors Meta-Interpretive Learning frameworks, with the LLM acting as a learned meta-interpreter.</li>
+    <li><strong>Predicate Invention</strong> <a href="#ref-dumancic">[6]</a> — arity-drift detection surfaces cases where the LLM has invented a richer predicate schema than what the gap report expected.</li>
+    <li><strong>Multi-Shot ASP Solving</strong> <a href="#ref-gebser">[8]</a> — the architecture is designed to adopt Clingo's multi-shot mode for streaming, stateful reasoning in future versions.</li>
+  </ul>
+
+  <hr>
+
+  <h2>Future Steps (LiveKnowledge v2.2+)</h2>
+
+  <p>v2.1 is an additive, shallow-resolution architecture. Several deferred features are planned:</p>
+
+  <h3>Semantic Gap-Completeness</h3>
+  <p>Currently, a gap is "closed" if the predicate name and arity appear anywhere in the augmented KB. Future versions will evaluate <strong>example-instance thresholds</strong>, inspect <strong>minimal models</strong>, and automatically re-answer the original question to prove the gap was actually resolved.</p>
+
+  <h3>Non-Monotonic Retractions</h3>
+  <p>Additive-only is a safe start, but real knowledge evolves. Future work will implement <strong>theory revision</strong> via minimal unsatisfiable core analysis, safely deleting or overriding outdated ASP fragments without breaking the rest of the knowledge graph <a href="#ref-dai">[7]</a>.</p>
+
+  <h3>Multi-Shot Stateful Reasoning</h3>
+  <p>Right now, every successful integration overwrites the prior snapshot. For real-time streaming agents, the system will adopt Clingo's <strong>multi-shot solving</strong> <a href="#ref-gebser">[8]</a>, maintaining a persistent, stateful reasoning stream that dynamically injects and toggles <code>#program</code> scenarios without ever re-grounding the entire KB.</p>
+
+  <hr>
+
+  <h2>References</h2>
+
+  <p id="ref-shetye" class="ref">[1] S. Shetye. <em>"An LLM-Modulo Framework for Automated PDDL Domain Model Generation."</em> Master Thesis, Universität Stuttgart. <a href="https://elib.uni-stuttgart.de/server/api/core/bitstreams/40946f84-8ab6-4934-8648-7d4b59103b7a/content">PDF</a></p>
+
+  <p id="ref-ishay" class="ref">[2] A. Ishay, J. Lee. <em>"LLMs as ASP Programmers: Self-Correction Enables Task-Agnostic Nonmonotonic Reasoning."</em> <a href="https://arxiv.org/html/2604.27960v1">arXiv:2604.27960</a></p>
+
+  <p id="ref-orvalho" class="ref">[3] P. Orvalho, M. Janota, V. Manquinho. <em>"Counterexample Guided Program Repair Using Zero-Shot Learning and MaxSAT-based Fault Localization."</em> AAAI 2025. <a href="https://web.ist.utl.pt/pmorvalho/papers/aaai25-LLM-CEGIS-Repair.pdf">PDF</a></p>
+
+  <p id="ref-borroto" class="ref">[4] M. Borroto, K. Gallagher, A. Ielo, I. Kareem, F. Ricca, A. Russo. <em>"Question Answering with LLMs and Learning from Answer Sets."</em> <a href="https://arxiv.org/pdf/2509.16590">arXiv:2509.16590</a></p>
+
+  <p id="ref-dreyfus" class="ref">[5] H. Dreyfus. <em>What Computers Still Can't Do: A Critique of Artificial Reason.</em> MIT Press, 1992.</p>
+
+  <p id="ref-dumancic" class="ref">[6] S. Dumančić, W. Meert, H. Blockeel. <em>"Theory Reconstruction: A Representation Learning View on Predicate Invention."</em> <a href="https://arxiv.org/pdf/1606.08660">arXiv:1606.08660</a></p>
+
+  <p id="ref-dai" class="ref">[7] W-Z. Dai, S.H. Muggleton. <em>"Abductive Knowledge Induction From Raw Data."</em> <a href="https://www.doc.ic.ac.uk/~shm/Papers/abdmetaraw.pdf">PDF</a></p>
+
+  <p id="ref-gebser" class="ref">[8] M. Gebser, R. Kaminski, B. Kaufmann, T. Schaub. <em>"Multi-shot ASP solving with Clingo."</em> Theory and Practice of Logic Programming, 2019. <a href="https://arxiv.org/pdf/1705.09811">arXiv:1705.09811</a></p>
+
+  <hr>
+
+  <div class="footer">
+    <a href="/">Adam Rybinski</a> &mdash; <a href="https://linkedin.com/in/adam-rybinski">LinkedIn</a> &mdash; <a href="https://github.com/adamrybinski/LiveKnowledge">GitHub</a><br>
+    <span style="font-size:0.8rem;">Part 1 of a series. <strong>Part&nbsp;2 coming soon</strong> — covers semantic gap-completeness, non-monotonic retractions, and multi-shot reasoning. Follow on <a href="https://dev.to/adamrybinski">dev.to</a> or subscribe via <a href="https://adamrybinski.com/">adamrybinski.com</a>.</span>
+  </div>
+
+</body>
+</html>

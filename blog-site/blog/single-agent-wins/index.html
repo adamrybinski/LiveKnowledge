@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Power of One — When Single-Agent AI Wins | Adam Rybinski</title>
+  <meta name="description" content="Multi-agent orchestration is transformative, but not every problem needs it. Single-agent models offer lower latency, fewer tokens, and context purity.">
+  <link rel="canonical" href="https://adamrybinski.com/blog/single-agent-wins">
+  <meta property="og:title" content="The Power of One — When Single-Agent AI Wins">
+  <meta property="og:description" content="Speed, cost, and context purity — why well-prompted single agents still beat complex chains for linear tasks.">
+  <meta property="og:url" content="https://adamrybinski.com/blog/single-agent-wins">
+  <meta name="twitter:card" content="summary">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.7; }
+    @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #e2e8f0; } }
+    a { color: #2563eb; text-decoration: none; }
+    h1 { font-size: 1.8rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2rem 0; }
+    .back { margin-bottom: 2rem; display: inline-block; font-size: 0.9rem; }
+    .footer { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-top: 3rem; border-top: 1px solid #e2e8f0; padding-top: 1.5rem; }
+    ul { padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <a class="back" href="/">&larr; Adam Rybinski</a>
+
+  <h1>The Power of One</h1>
+  <p style="color:#666;">When single-agent AI wins. Is multi-agent always the answer? Don't overengineer simplicity.</p>
+
+  <p>Multi-agent orchestration is transforming how we build complex AI workflows. But it comes with real costs — latency, token waste, and the risk of information degrading as it passes between agents.</p>
+
+  <p>A single, well-prompted model offers three advantages that many teams overlook:</p>
+
+  <h2>Context purity</h2>
+  <p>The model holds the entire narrative in one context window. There is no "telephone game" — no risk of a summariser losing a critical detail that the next agent needed. For linear tasks (classify → extract → format), a single call is not just faster — it is safer.</p>
+
+  <h2>Latency</h2>
+  <p>Every agent handoff adds network time, context switching, and serialised I/O. A single-agent pipeline completes in one round trip. For real-time or near-real-time use cases, that difference can be the difference between usable and unusable.</p>
+
+  <h2>Token cost</h2>
+  <p>The overhead of agent-to-agent negotiation — explaining the task, passing intermediate results, reconfirming context — adds tokens with every hop. A single-agent model pays that cost once.</p>
+
+  <hr>
+
+  <h2>When to go multi-agent</h2>
+
+  <p>None of this means multi-agent is wrong. It means you should choose deliberately:</p>
+
+  <ul>
+    <li><strong>Single-agent</strong> for linear extraction, transformation, classification, simple question-answering.</li>
+    <li><strong>Multi-agent</strong> when the task requires diverse reasoning strategies, tool access, or parallel subtasks that a single model cannot handle in one context window.</li>
+  </ul>
+
+  <p>Build a balanced strategy. Identify where focused simplicity excels and where collaborative intelligence is actually essential.</p>
+
+  <div class="footer">
+    <a href="/">Adam Rybinski</a> &mdash; <a href="https://linkedin.com/in/adam-rybinski">LinkedIn</a>
+  </div>
+</body>
+</html>
