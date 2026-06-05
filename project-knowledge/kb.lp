@@ -415,3 +415,55 @@ integration_result_field(id).
 integration_result_field(success).
 integration_result_field(message).
 integration_result_field(updated_program).
+
+% answer_question flow step ordering
+aq_step(t_answer_generate).
+aq_step(c_answer_verify).
+aq_step(d_answer_verified).
+aq_step(t_answer_abduce).
+aq_step(t_answer_revise).
+aq_step(t_answer_commit).
+aq_step(f_answer_failed).
+
+aq_order(t_answer_generate, c_answer_verify).
+aq_order(c_answer_verify, d_answer_verified).
+aq_order(d_answer_verified, t_answer_commit).
+aq_order(d_answer_verified, t_answer_abduce).
+aq_order(d_answer_verified, f_answer_failed).
+aq_order(t_answer_abduce, t_answer_revise).
+aq_order(t_answer_revise, c_answer_verify).
+
+% integrate_knowledge flow step ordering
+ik_step(t_knowledge_verify).
+ik_step(d_knowledge_verified).
+ik_step(t_knowledge_abduce).
+ik_step(t_knowledge_revise).
+ik_step(t_knowledge_integrate).
+ik_step(f_knowledge_failed).
+
+ik_order(t_knowledge_verify, d_knowledge_verified).
+ik_order(d_knowledge_verified, t_knowledge_integrate).
+ik_order(d_knowledge_verified, t_knowledge_abduce).
+ik_order(d_knowledge_verified, f_knowledge_failed).
+ik_order(t_knowledge_abduce, t_knowledge_revise).
+ik_order(t_knowledge_revise, t_knowledge_verify).
+
+% learn composition step ordering
+learn_step(t_learn_generate).
+learn_step(t_learn_integrate).
+learn_step(t_learn_persist).
+learn_step(t_learn_resolve_gap).
+learn_step(t_learn_reask).
+
+learn_order(t_learn_generate, t_learn_integrate).
+learn_order(t_learn_integrate, t_learn_persist).
+learn_order(t_learn_persist, t_learn_resolve_gap).
+learn_order(t_learn_resolve_gap, t_learn_reask).
+
+% Failure conditions
+aq_failure_reason(iterations_exceeded).
+aq_failure_reason(unrecoverable).
+
+% I-QUESTION-TERMINATES: answer_question always reaches commit or failed
+aq_terminates(Loop) :- active(Loop), loop_status(Loop), flow(Loop), loop_flow(Loop, answer_question), reached(Loop, t_answer_commit).
+aq_terminates(Loop) :- active(Loop), loop_status(Loop), flow(Loop), loop_flow(Loop, answer_question), reached(Loop, f_answer_failed).
