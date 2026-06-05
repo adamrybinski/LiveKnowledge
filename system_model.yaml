@@ -23,10 +23,15 @@ purpose: >
     than local satisfiability of the candidate in isolation. This is the
     key semantic fix: a candidate that contradicts existing KB facts is
     rejected even when it is satisfiable on its own.
+    Solo solve grounding failure is treated as expected (candidate
+    references KB predicates) and does not block merged verification.
   - revise is split into revise_answer and revise_knowledge in the
     primitives list, matching the Python implementation.
   - integrate primitive description is sharpened to "apply verified
     candidate to KB and produce a new immutable KB snapshot".
+    Additionally, a redundancy check was added: if every fact and rule
+    in the candidate already exists verbatim in the KB, the merge is
+    skipped and the result reports "redundant — nothing added."
   - T-KNOWLEDGE-VERIFY and T-KNOWLEDGE-INTEGRATE step descriptions are
     updated to reflect merged-coherence and snapshot semantics.
   - A higher-level learn composition is added (see flows_compositions) that
@@ -37,6 +42,13 @@ purpose: >
     the answer. This creates a knowledge_gap_report artifact at the CLI
     level that bridges the answer and learning flows (ask --gap-report →
     learn --fill-gap).
+  - The integrate_knowledge flow now accepts an auto_revise parameter.
+    When auto_revise=False (used by the CLI "integrate" command for
+    hand-written programs), a rejected candidate triggers an immediate
+    flow failure with a clear conflict message rather than entering the
+    abduce/revise loop. The learn flow defaults to auto_revise=True.
+  - Candidate knowledge fragments are expected NOT to include #show
+    directives — projection is a per-run concern, not KB content.
 
   Persistence policy (CLI-level, not modeled in the per-flow semantics):
   - integrate_knowledge produces a new in-memory KnowledgeBase object;
@@ -213,6 +225,10 @@ primitive_descriptions:
       and structuring facts from an external_source_text. Uses the current
       knowledge_base as vocabulary guide. LLM-backed. Python assigns the
       artifact id.
+      The candidate MUST NOT include #show directives — they are query-
+      specific and added per-run, not stored in the KB.
+      The candidate MUST NOT restate existing KB facts or rules. Output
+      only ADDITIVE new content.
       Optionally accepts an external gap_context (from a knowledge_gap_report)
       as a prioritisation signal. When present, the LLM biases extraction
       toward facts and rules that match the missing predicates or topics
@@ -232,6 +248,10 @@ primitive_descriptions:
       candidate that is locally satisfiable but contradicts existing KB
       facts is rejected because the merged program is unsatisfiable.
       Returns a VerificationReport with verifier_kind="clingo".
+      Note: the solo solve may fail to ground if the candidate references
+      KB-only predicates. This is treated as expected and does not block
+      merged verification. The merged program must still be satisfiable
+      for the candidate to pass.
   - id: abduce_answer
     description: >
       Produce an AbductiveHypothesis + Critique explaining why a candidate
@@ -254,6 +274,8 @@ primitive_descriptions:
       that addresses the critique of the previous candidate. The candidate
       is an additive ASP fragment; the LLM is expected to drop or rewrite
       facts that would contradict the existing KB.
+      The revised candidate MUST NOT include #show directives and MUST NOT
+      restate existing KB facts. Output only the changed or new fragment.
       LLM-backed.
   - id: integrate
     description: >
@@ -262,6 +284,10 @@ primitive_descriptions:
       Enforces I-INTEGRATE-KNOWLEDGE-ONLY-IF-VERIFIED. The new KB carries
       provenance metadata (e.g. last_integrated_candidate) so successive
       integrations are auditable.
+      Before merging, a redundancy check is performed: if every non-comment
+      line of the candidate already exists verbatim in the KB, the merge is
+      skipped and the result reports the candidate as redundant. This
+      prevents silent duplication of already-known facts.
   - id: commit
     description: >
       Promote a verified CandidateAnswer to a FinalAnswer. Enforces
@@ -431,6 +457,10 @@ flows:
     input:
       - candidate_knowledge
       - knowledge_base
+      - auto_revise (optional; default True. When False, a rejected
+          candidate triggers immediate flow failure instead of entering
+          the abduce/revise loop. Used for hand-written programs where
+          conflicts should be surfaced to the user rather than auto-fixed.)
     output:
       - integration_result
       - knowledge_base
@@ -463,6 +493,11 @@ flows:
             goto: T-KNOWLEDGE-INTEGRATE
           - condition: "verification_report.status == rejected"
             goto: T-KNOWLEDGE-ABDUCE
+            semantics: >
+              When auto_revise=False, this branch is overridden: a rejected
+              candidate goes to F-KNOWLEDGE-FAILED instead of entering the
+              abduce/revise loop. The failure message includes the rejection
+              reason so the user can resolve the conflict manually.
           - condition: "verification_report.status == failed and G-VERIFICATION-FAILURE-RECOVERABLE"
             goto: T-KNOWLEDGE-ABDUCE
           - condition: "verification_report.status == failed and G-VERIFICATION-FAILURE-UNRECOVERABLE"
@@ -653,6 +688,10 @@ flows_compositions:
           - knowledge_base (the augmented one)
         output:
           - final_answer
+          - knowledge_gap_report (optional; when the --gap-report flag is
+              passed to the learn command, the re-ask's committed answer
+              is also surfaced as a gap report, capturing any new missing
+              predicates that may have appeared after integration)
     invariants_used:
       - I-INTEGRATE-KNOWLEDGE-ONLY-IF-VERIFIED
       - I-COMMIT-ANSWER-ONLY-IF-VERIFIED
