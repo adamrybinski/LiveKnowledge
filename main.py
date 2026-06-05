@@ -1649,6 +1649,13 @@ def integrate_knowledge(
     """
     iteration = 0
     candidate = candidate_knowledge
+    # Re-assign id from factory to avoid collision with reports
+    if candidate.id and candidate.id.startswith("ck-") and len(candidate.id) <= 6:
+        candidate = CandidateKnowledge(
+            id=id_factory(),
+            asp_program=candidate.asp_program,
+            notes=candidate.notes,
+        )
     registry.register(candidate)
     while True:
         iteration += 1
