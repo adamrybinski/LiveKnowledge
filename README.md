@@ -172,48 +172,23 @@ state: open                    state: open (updated)     state: closed
 
 ---
 
-## Architecture summary
+## Architecture
 
-```
-                      answer_question flow
-                      ┌──────────────────────────┐
-       question ─────►│  generate (LLM)           │
-                      │  verify (LLM)             │
-                      │  abduce / revise (loop)   │
-                      │  commit                   │────► final_answer
-                      └──────────────────────────┘
-                               │
-                      gap_rationale (in rationale)
-                               │
-                               ▼
-                      knowledge_gap_report (JSON)
-                      ┌──────────────────────────┐
-                      │  target_predicates        │
-                      │  status: open             │
-                      │  target_review (optional) │
-                      └──────────────────────────┘
-                               │
-                               ▼
-                    learn composition
-                    ┌──────────────────────────────────┐
-     source text ──►│  generate_knowledge (LLM,        │
-                    │    with gap_context targeting)    │
-                    │  integrate_knowledge (Clingo      │
-                    │    merged-coherence verify)       │
-                    │  persist KB to disk               │
-                    │  verify_gap_resolution (text scan)│
-                    │  update gap file                  │
-                    │  re-ask (optional)                │
-                    └──────────────────────────────────┘
+```text
+main.py          # Thin CLI entrypoint
+artifacts.py     # Dataclasses, registry, id factory, exceptions
+prompts.py       # LLM system prompts
+llm.py           # OpenAI client, JSON extraction, typed parsing
+solver.py        # clingo_solve, SolveResult
+primitives.py    # Generate, verify, abduce, revise, merge, commit, fail, classify
+flows.py         # answer_question, integrate_knowledge, Orchestrator
+gap_report.py    # Gap report schema, predicate scan, resolution, persistence
+tests/test_v2_1.py
 ```
 
-### Key concepts
+### Naming note
 
-- **Knowledge Base (`kb.lp`)** — pure ASP facts and rules. No `#show` directives (projection is a per-run concern). Lives separately from the engine code.
-- **Candidate knowledge** — extracted ASP fragments that are additive and merged into the KB after verification.
-- **Merged-coherence verification** — Clingo solves the combined KB + candidate program. If unsatisfiable, the candidate is rejected as contradictory.
-- **Abductive revision** — when a candidate is rejected, the LLM generates a hypothesis about the failure and a repair plan, then revises the candidate.
-- **Gap report** — structured orchestrator artifact. Bridges the answer and learning flows. Not a flow artifact — lives outside the registry machinery.
+The system model uses compact field names such as `sourcetext`, `aspprogram`, `targetpredicates`, and `targetreview`. Python-facing artifact constructors accept both those compact names *and* snake_case aliases (`source_text`, `asp_program`, `target_predicates`, `target_review`). The compact names remain the canonical system-model vocabulary; the snake_case forms are ergonomic aliases.
 
 ---
 
