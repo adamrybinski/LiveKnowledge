@@ -218,7 +218,7 @@ def cmd_integrate(args: argparse.Namespace, orch: flows.Orchestrator) -> int:
 
 
 def cmd_learn(args: argparse.Namespace, orch: flows.Orchestrator) -> int:
-    kb = primitives._load_kb(args.kb)
+    kb = _load_kb(args.kb)
 
     # Resolve source text + gap context.
     src_path = args.unstructured
@@ -413,6 +413,10 @@ def main() -> None:
     p_int.add_argument(
         "--max-iterations", type=int, default=3,
         help="Flow bound (default 3)",
+    )
+    p_int.add_argument(
+        "--out-kb", default=None,
+        help="Where to write augmented KB (default: overwrite --kb)",
     )
 
     p_learn = sub.add_parser(

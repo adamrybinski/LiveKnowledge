@@ -467,3 +467,30 @@ aq_failure_reason(unrecoverable).
 % I-QUESTION-TERMINATES: answer_question always reaches commit or failed
 aq_terminates(Loop) :- active(Loop), loop_status(Loop), flow(Loop), loop_flow(Loop, answer_question), reached(Loop, t_answer_commit).
 aq_terminates(Loop) :- active(Loop), loop_status(Loop), flow(Loop), loop_flow(Loop, answer_question), reached(Loop, f_answer_failed).
+
+% Reviewed candidate fragment extracted from README probe.
+% Promotion path: learn probe -> manual review -> integrate CLI.
+
+gap_report_json_field(committed_answer).
+
+integration_result_field(id).
+integration_result_field(success).
+integration_result_field(message).
+integration_result_field(updated_program).
+
+gap_resolution_status(resolved).
+gap_resolution_status(exact_target_missing).
+gap_resolution_status(related_predicate_found).
+gap_resolution_status(excluded_by_review).
+
+gap_report_persistence(gaps_json).
+gap_report_persistence_serialized_to_json.
+
+fill_gap_prioritises_extraction.
+fill_gap_verifies_resolution.
+fill_gap_updates_gap_file.
+
+learn_consume_fill_gap :- cli_command(learn), has_flag(learn, fill_gap).
+learn_integrate_skipped_reask :- cli_command(learn), has_flag(learn, skip_reask).
+
+related_predicate_arity_drift(PredArity, RelatedArity) :- gap_resolution(GapRes), related_predicates_found(GapRes, PredArity, RelatedArity).

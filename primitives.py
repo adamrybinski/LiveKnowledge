@@ -107,22 +107,18 @@ def generate_answer(
     LLM-backed answer proposal. Python assigns the artifact id after the
     content is parsed and validated.
     """
-    user_prompt = (
-        f"Question (id={question.id}):\n{question.text}\n\n"
-        f"Knowledge base (id={kb.id}):\n{kb.asp_program}\n\n"
-        f"Knowledge base notes: {kb.metadata.get('notes', '')}\n\n"
-        "Propose an answer grounded in the knowledge base."
-    )
+    logger.info("PRIMITIVE start label=generate_answer question_id=%s", question.id)
     parsed = llm.call_llm_json(
         client, prompts.GENERATE_ANSWER_SYSTEM, user_prompt,
         llm._TA_CAND_ANSWER, label="generate_answer",
     )
-    return CandidateAnswer(
-        id=id_factory(),
-        question_id=question.id,
-        text=parsed.text,
-        rationale=parsed.rationale,
+    logger.info(
+        "PRIMITIVE end label=generate_answer candidate_id=%s question_id=%s chars=%d",
+        candidate.id,
+        candidate.question_id,
+        len(candidate.text),
     )
+    return candidate
 
 
 def verify_candidate_answer(
@@ -137,27 +133,20 @@ def verify_candidate_answer(
     LLM-backed text verification. Returns a VerificationReport with
     verifier_kind="llm". Python assigns the artifact id.
     """
-    user_prompt = (
-        f"Question (id={answer.question_id}):\n"
-        f"---\n"
-        f"Candidate answer (id={answer.id}):\n{answer.text}\n"
-        f"Rationale: {answer.rationale}\n\n"
-        f"Knowledge base (id={kb.id}):\n{kb.asp_program}\n\n"
-        "Verify the candidate answer against the knowledge base. "
-        "Quote supporting rules/facts in 'evidence'."
+    logger.info(
+        "PRIMITIVE start label=verify_candidate_answer candidate_id=%s verifier=llm",
+        answer.id,
     )
     parsed = llm.call_llm_json(
         client, prompts.VERIFY_ANSWER_SYSTEM, user_prompt,
         llm._TA_ANSWER_VERIFY, label="verify_answer",
     )
-    return VerificationReport(
-        id=id_factory(),
-        status=parsed.status,
-        reason=parsed.reason,
-        evidence=parsed.evidence,
-        raw_output="",
-        verifier_kind="llm",
+    logger.info(
+        "PRIMITIVE end label=verify_candidate_answer report_id=%s status=%s",
+        report.id,
+        report.status,
     )
+    return report
 
 
 def verify_candidate_knowledge(
@@ -168,14 +157,18 @@ def verify_candidate_knowledge(
     """
     DSL-MAP: PRIMITIVE-VERIFY-KNOWLEDGE (v2.1 merged-coherence semantics)
     """
-    # Step 1: solve the candidate alone for self-contradiction.
+    logger.info(
+        "PRIMITIVE start label=verify_candidate_knowledge candidate_id=%s verifier=clingo kb_id=%s",
+        ck.id,
+        kb.id,
+    )
     solo = solver.clingo_solve(ck.asp_program)
     if not solo.ok:
-        # Grounding failure likely means candidate references KB-only predicates.
-        # Skip to merged solve rather than returning failed.
-        pass
+        logger.info(
+            "PRIMITIVE end label=verify_candidate_knowledge status=skipped_solo reason=solo_grounding_failure"
+        )
     elif not solo.satisfiable:
-        return VerificationReport(
+        report = VerificationReport(
             id=id_factory(),
             status="rejected",
             reason=(
@@ -186,12 +179,18 @@ def verify_candidate_knowledge(
             raw_output=json.dumps({"models": solo.models, "cost": solo.cost}),
             verifier_kind="clingo",
         )
+        logger.info(
+            "PRIMITIVE end label=verify_candidate_knowledge report_id=%s status=%s reason=%s",
+            report.id,
+            report.status,
+            (report.reason or "")[:120],
+        )
+        return report
 
-    # Step 2: solve the MERGED program (kb + candidate).
     merged_program = kb.asp_program.rstrip() + "\n\n" + ck.asp_program.strip() + "\n"
     merged = solver.clingo_solve(merged_program)
     if not merged.ok:
-        return VerificationReport(
+        report = VerificationReport(
             id=id_factory(),
             status="failed",
             reason=merged.error or "Clingo solve error on merged program",
@@ -199,8 +198,15 @@ def verify_candidate_knowledge(
             raw_output=merged.error,
             verifier_kind="clingo",
         )
+        logger.info(
+            "PRIMITIVE end label=verify_candidate_knowledge report_id=%s status=%s reason=%s",
+            report.id,
+            report.status,
+            (report.reason or "")[:120],
+        )
+        return report
     if not merged.satisfiable:
-        return VerificationReport(
+        report = VerificationReport(
             id=id_factory(),
             status="rejected",
             reason=(
@@ -219,9 +225,15 @@ def verify_candidate_knowledge(
             ),
             verifier_kind="clingo",
         )
+        logger.info(
+            "PRIMITIVE end label=verify_candidate_knowledge report_id=%s status=%s reason=%s",
+            report.id,
+            report.status,
+            (report.reason or "")[:120],
+        )
+        return report
 
-    # Both sat: verified.
-    return VerificationReport(
+    report = VerificationReport(
         id=id_factory(),
         status="verified",
         reason=(
@@ -240,6 +252,13 @@ def verify_candidate_knowledge(
         ),
         verifier_kind="clingo",
     )
+    logger.info(
+        "PRIMITIVE end label=verify_candidate_knowledge report_id=%s status=%s reason=%s",
+        report.id,
+        report.status,
+        (report.reason or "")[:120],
+    )
+    return report
 
 
 def abduce_answer(
@@ -257,17 +276,10 @@ def abduce_answer(
     LLM-backed abductive revision. Produces an AbductiveHypothesis + a
     Critique that targets the existing candidate (I-CRITIQUE-MUST-TARGET-EXISTING-ARTIFACT).
     """
-    user_prompt = (
-        f"Question (id={question.id}):\n{question.text}\n\n"
-        f"Knowledge base (id={kb.id}):\n{kb.asp_program}\n\n"
-        f"Candidate answer (id={candidate.id}):\n{candidate.text}\n"
-        f"Rationale: {candidate.rationale}\n\n"
-        f"Verification report (id={report.id}, verifier={report.verifier_kind}):\n"
-        f"  status:  {report.status}\n"
-        f"  reason:  {report.reason}\n"
-        f"  evidence:{report.evidence}\n\n"
-        f"Produce an abductive hypothesis. The critique.target_id must be: "
-        f"\"{candidate.id}\"."
+    logger.info(
+        "PRIMITIVE start label=abduce_answer candidate_id=%s report_id=%s",
+        candidate.id,
+        report.id,
     )
     parsed = llm.call_llm_json(
         client, prompts.ABDUCE_SYSTEM, user_prompt,

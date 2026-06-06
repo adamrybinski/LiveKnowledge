@@ -1,9 +1,8 @@
 """
-LLM client initialization, JSON extraction, typed parsing, and Pydantic
-boundary models.
+LLM client initialization, JSON extraction, typed parsing, and Pydantic boundary models.
 
-This module owns the OpenAI client contract and everything that touches raw
-LLM output. Flow logic lives in primitives.py and flows.py.
+This module owns the OpenAI client contract and everything that touches raw LLM output.
+Flow logic lives in primitives.py and flows.py.
 """
 
 from __future__ import annotations
@@ -12,15 +11,17 @@ import json
 import os
 import re
 import time
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional
 
-import clingo
-from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+import dotenv
+from dotenv import load_dotenv
+
 import artifacts
 import prompts
+
 
 load_dotenv()
 
@@ -28,54 +29,28 @@ MODEL = os.getenv("LLM_MODEL")
 BASE_URL = os.getenv("LLM_BASE_URL")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "4"))
 MAX_JSON_RETRIES = int(os.getenv("MAX_JSON_RETRIES", "2"))
-MAX_MODELS = int(os.getenv("MAX_MODELS", "3"))
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "0"))
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_RAW_LLM = os.getenv("LOG_RAW_LLM", "0") == "1"
 
-import logging as _logging
-logger = _logging.getLogger("asplearning.main2")
+import logging
+logger = logging.getLogger("asplearning.llm")
 
 
 def get_client() -> OpenAI:
-    """
-    DSL-MAP: ROLE-ACCESS-INFRASTRUCTURE
-
-    Returns the LLM client. Mirrors main.py initialization so we reuse the
-    same .env contract (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL).
-    """
     if not LLM_API_KEY:
         raise RuntimeError("Missing LLM_API_KEY environment variable.")
-    kwargs: Dict[str, Any] = {"api_key": LLM_API_KEY}
+    kwargs: dict[str, Any] = {"api_key": LLM_API_KEY}
     if BASE_URL:
         kwargs["base_url"] = BASE_URL
-    logger.info(
-        "Initializing LLM client model=%s base_url=%s",
-        MODEL,
-        BASE_URL or "<default>",
-    )
+    logger.info("Initializing LLM client model=%s base_url=%s", MODEL, BASE_URL or "<default>")
     return OpenAI(**kwargs)
 
-
-# ---------------------------------------------------------------------------
-# JSON extraction
-# ---------------------------------------------------------------------------
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 
 
 def extract_json(text: str) -> dict:
-    """
-    DSL-MAP: INTERMEDIATE-ARTIFACT-NORMALIZATION
-
-    Best-effort extraction of a JSON object from LLM output. Tries:
-      1. Direct json.loads
-      2. Strip ```json fences
-      3. Slice between first '{' and last '}'
-    Raises artifacts.LLMArtifactError on total failure.
-    """
     text = text.strip()
     try:
         loaded = json.loads(text)
@@ -108,14 +83,8 @@ def extract_json(text: str) -> dict:
                 f"JSON parse failed after slicing: {e2}", raw_text=text
             ) from e2
 
-    raise artifacts.LLMArtifactError(
-        f"JSON parse failed: no object in text", raw_text=text
-    )
+    raise artifacts.LLMArtifactError("JSON parse failed: no object in text", raw_text=text)
 
-
-# ---------------------------------------------------------------------------
-# Pydantic boundary models
-# ---------------------------------------------------------------------------
 
 class _CandidateAnswerContent(BaseModel):
     question_id: str = ""
@@ -136,9 +105,9 @@ class _CritiqueContent(BaseModel):
 
 
 class _AbductionContent(BaseModel):
-    explanation: str
+    explanation: str = ""
     repair_plan: str = ""
-    critique: _CritiqueContent
+    critique: '_CritiqueContent'
 
 
 class _ReviseAnswerContent(BaseModel):
@@ -154,27 +123,19 @@ class _CandidateKnowledgeContent(BaseModel):
 
 _TA_CAND_ANSWER = TypeAdapter(_CandidateAnswerContent)
 _TA_ANSWER_VERIFY = TypeAdapter(_AnswerVerifyContent)
-_TA_ABDUCTION = TypeAdapter(_AbductionContent)
 _TA_REVISE_ANSWER = TypeAdapter(_ReviseAnswerContent)
 _TA_CAND_KNOWLEDGE = TypeAdapter(_CandidateKnowledgeContent)
+_AbductionContent.model_rebuild()
+_TA_ABDUCTION = TypeAdapter(_AbductionContent)
 
 
-# ---------------------------------------------------------------------------
-# LLM transport + retry
-# ---------------------------------------------------------------------------
-
-def _call_llm_raw(
-    client: OpenAI,
-    system_prompt: str,
-    user_prompt: str,
-    label: str,
-) -> str:
-    """Thin transport wrapper; returns the raw text output."""
+def _call_llm_raw(client: OpenAI, system_prompt: str, user_prompt: str, label: str) -> str:
     logger.info(
-        "Calling LLM label=%s model=%s prompt_chars=%d",
+        "LLM call label=%s model=%s system_chars=%d user_chars=%d",
         label,
         MODEL,
-        len(system_prompt) + len(user_prompt),
+        len(system_prompt),
+        len(user_prompt),
     )
     try:
         response = client.chat.completions.create(
@@ -201,23 +162,15 @@ def call_llm_json(
     adapter: TypeAdapter,
     label: str,
 ) -> BaseModel:
-    """
-    Call the LLM, extract JSON, and validate it through the supplied Pydantic
-    TypeAdapter. Retries malformed JSON up to MAX_JSON_RETRIES times; raises
-    LLMArtifactError on total failure.
-
-    This is the single shared JSON extraction + retry path used by all
-    primitives that call the LLM. Primitive functions in primitives.py build
-    the prompts and pass them here; this helper owns transport + parsing.
-    """
     last_error: Optional[Exception] = None
     last_raw: str = ""
-    for attempt in range(1, MAX_JSON_RETRIES + 2):  # 1 initial + N retries
+    for attempt in range(1, MAX_JSON_RETRIES + 2):
         try:
-            raw = _call_llm_raw(client, system_prompt, user_prompt, label=label)
-            last_raw = raw
-            data = extract_json(raw)
-            return adapter.validate_python(data)
+            raw_text = _call_llm_raw(client, system_prompt, user_prompt, label=label)
+            last_raw = raw_text
+            logger.info("LLM raw_length=%d label=%s attempt=%d", len(raw_text), label, attempt)
+            data = extract_json(raw_text)
+            model = adapter.validate_python(data)
         except (artifacts.LLMArtifactError, ValidationError) as e:
             last_error = e
             logger.warning(
@@ -226,12 +179,15 @@ def call_llm_json(
                 attempt,
                 e,
             )
+            if LOG_RAW_LLM:
+                logger.debug("Raw LLM output label=%s attempt=%d:\n%s", label, attempt, last_raw)
             if attempt <= MAX_JSON_RETRIES:
                 if RETRY_DELAY > 0:
                     time.sleep(RETRY_DELAY)
                 continue
-            raise
-    raise artifacts.LLMArtifactError(
-        f"LLM JSON could not be recovered after {MAX_JSON_RETRIES + 1} attempts: {last_error}",
-        raw_text=last_raw,
-    )
+            raise artifacts.LLMArtifactError(
+                f"LLM JSON could not be recovered after {MAX_JSON_RETRIES + 1} attempts: {last_error}",
+                raw_text=last_raw,
+            ) from last_error
+        return model
+    raise RuntimeError("unreachable")

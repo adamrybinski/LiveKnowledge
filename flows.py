@@ -45,11 +45,12 @@ def answer_question(
     id_factory,
     max_iterations: int = 3,
 ) -> FinalAnswer:
-    """
-    DSL-MAP: FLOW-ANSWER-QUESTION
-
-    Direct translation of system_model.yaml flows.answer_question.
-    """
+    logger.info(
+        "FLOW start label=answer_question question_id=%s kb_id=%s max_iterations=%d",
+        question.id,
+        kb.id,
+        max_iterations,
+    )
     # T-ANSWER-GENERATE
     candidate = primitives.generate_answer(question, kb, client, id_factory)
     registry.register(candidate)
@@ -119,12 +120,13 @@ def integrate_knowledge(
     max_iterations: int = 3,
     auto_revise: bool = True,
 ) -> Tuple[artifacts.IntegrationResult, KnowledgeBase]:
-    """
-    DSL-MAP: FLOW-INTEGRATE-KNOWLEDGE
-
-    Direct translation of system_model.yaml flows.integrate_knowledge.
-    Returns (IntegrationResult, new_kb).
-    """
+    logger.info(
+        "FLOW start label=integrate_knowledge candidate_id=%s kb_id=%s auto_revise=%s max_iterations=%d",
+        candidate_knowledge.id,
+        kb.id,
+        auto_revise,
+        max_iterations,
+    )
     iteration = 0
     candidate = candidate_knowledge
 
