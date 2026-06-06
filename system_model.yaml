@@ -1,400 +1,155 @@
 system: LiveKnowledge
 version: "2.1"
+knowledge_mode: additive_only
 
-purpose: >
-  Orchestrate actor-critic reasoning over questions, answers, and knowledge
-  updates, with abductive revision and split verification (LLM-backed for
-  answers, Clingo-backed for knowledge) in bounded feedback loops.
+runtime_semantics: >
+  answer_question: closed-world over supplied KB. LLM proposes and verifies
+  candidate answers; abduce/revise loop on rejection; commit on verified.
+  integrate_knowledge: Clingo checks merged satisfiability of KB ⊕ candidate.
+  Verified candidates produce new immutable KB snapshots (in-memory).
+  Contradictions cause rejection; the abduce/revise loop runs only when
+  auto_revise=true (default for learn, false for integrate).
 
-  Architectural character of the two flows:
-  - The answer flow reasons over candidate answers and produces an ephemeral
-    final_answer. It is closed-world with respect to the supplied KB.
-  - The knowledge flow reasons over state transitions of the knowledge_base.
-    A verified candidate is materialized into a NEW immutable KB snapshot,
-    preserving the old one. The integrated KB carries provenance metadata
-    (last_integrated_candidate) so successive integrations are auditable.
-  In v2.1 the knowledge flow is purely additive: candidate_knowledge is an
-  ASP fragment to merge, not a delta with retractions. Contradictions are
-  handled by rejecting the candidate and revising it in the abduce loop;
-  they never overwrite prior KB state.
-
-  v2.1 changes from v0.2:
-  - verify_knowledge now checks merged coherence (KB ⊕ candidate) rather
-    than local satisfiability of the candidate in isolation. This is the
-    key semantic fix: a candidate that contradicts existing KB facts is
-    rejected even when it is satisfiable on its own.
-    Solo solve grounding failure is treated as expected (candidate
-    references KB predicates) and does not block merged verification.
-  - revise is split into revise_answer and revise_knowledge in the
-    primitives list, matching the Python implementation.
-  - integrate primitive description is sharpened to "apply verified
-    candidate to KB and produce a new immutable KB snapshot".
-    Additionally, a redundancy check was added: if every fact and rule
-    in the candidate already exists verbatim in the KB, the merge is
-    skipped and the result reports "redundant — nothing added."
-  - T-KNOWLEDGE-VERIFY and T-KNOWLEDGE-INTEGRATE step descriptions are
-    updated to reflect merged-coherence and snapshot semantics.
-  - A higher-level learn composition is added (see flows_compositions) that
-    chains generate_knowledge -> integrate_knowledge -> optional re-ask
-    against the augmented KB. This is the user-facing learning loop.
-  - The generate (answer) primitive's rationale field now doubles as a gap
-    signal: it must list missing predicates or topics that would improve
-    the answer. This creates a knowledge_gap_report artifact at the CLI
-    level that bridges the answer and learning flows (ask --gap-report →
-    learn --fill-gap).
-  - The integrate_knowledge flow now accepts an auto_revise parameter.
-    When auto_revise=False (used by the CLI "integrate" command for
-    hand-written programs), a rejected candidate triggers an immediate
-    flow failure with a clear conflict message rather than entering the
-    abduce/revise loop. The learn flow defaults to auto_revise=True.
-  - Candidate knowledge fragments are expected NOT to include #show
-    directives — projection is a per-run concern, not KB content.
-
-  Persistence policy (CLI-level, not modeled in the per-flow semantics):
-  - integrate_knowledge produces a new in-memory KnowledgeBase object;
-    the in-memory prior KB reference held by the caller is NOT mutated.
-  - HOW the augmented KB is persisted to disk is a CLI / orchestrator
-    concern, not a flow concern. The current CLI default is to overwrite
-    the source KB file in place so the working KB is always the latest
-    augmented one; an --out-kb flag keeps the source and writes the
-    augmented copy elsewhere. This is intentional and auditable via git
-    diff. The "prior KB is preserved" claim below applies to the in-memory
-    artifact; on disk, the file is overwritten on successful integration.
-  - The CLI guarantees that integration failure (rejected or unrecoverable
-    failed) does NOT touch the on-disk KB: the write step only runs after
-    a successful integration.
-
-  Carried over from v0.2 (still true):
-  - Answer verification is LLM-backed (not Clingo-backed)
-  - Knowledge verification is Clingo-backed
-  - VerificationReport.status includes "failed" for transport/verifier failures
-  - Abduce is split into abduce_answer and abduce_knowledge
-  - Reject primitive removed for v1 (rejection is implicit via VerificationReport.status)
-  - Revised artifacts are immutable snapshots with new IDs assigned by Python
-
-  Explicitly out of scope for v2.1 (deferred to v2.2+):
-  - Retractions / deletions in candidate_knowledge (no native ASP remove op).
-  - A separate knowledge_delta artifact (additive candidate is sufficient).
-  - Pre/post-KB invariant formulations (no runtime invariant checker yet).
-  - Minimal unsatisfiable core / differential solving analysis.
-  - A standalone analyse_gaps primitive (gap analysis is embedded in the
-    generate primitive's rationale field and surfaced at the orchestrator
-    / CLI level via knowledge_gap_report; a dedicated primitive with its
-    own artifact schema is deferred).
-  - Semantic gap-completeness verification. v2.1 resolves gaps at the
-    predicate-presence level only ("predicate name appears in KB").
-    Stronger checks (example-instance thresholds, question re-answer
-    evaluation, minimal model inspection) are deferred.
+persistence_semantics: >
+  Integration is purely in-memory — prior KB is not mutated. CLI persist step
+  writes augmented KB to disk on success (default: overwrite source KB file).
+  --out-kb writes augmented KB elsewhere. Failure never writes to disk.
+  KB files are pure ASP facts and rules, no #show directives.
 
 roles:
-  - id: actor
-    name: proposer
-  - id: critic
-    name: verifier
-  - id: critic
-    name: abductive_revisor
+  - id: proposer
+    name: llm_generator
+  - id: verifier
+    name: llm_verifier
+  - id: abductive_revisor
+    name: llm_revisor
   - id: solver
     name: clingo
-  - id: memory
-    name: knowledge_store
-  - id: coordinator
-    name: orchestrator
+  - id: knowledge_store
+    name: kb_manager
+  - id: orchestrator
+    name: coordinator
 
 artifacts:
-  - question
-  - knowledge_base
-  - candidate_answer
-  - candidate_knowledge
-  - external_source_text
-  - critique
-  - verification_report
-  - abductive_hypothesis
-  - final_answer
-  - integration_result
-  - loop_status
+  - id: question
+    fields: [id, text]
+  - id: knowledge_base
+    fields: [id, sourcetext, aspprogram, metadata]
+  - id: candidate_answer
+    fields: [id, questionid, text, rationale]
+  - id: candidate_knowledge
+    fields: [id, aspprogram, notes]
+  - id: external_source_text
+    fields: [id, text]
+  - id: critique
+    fields: [id, targetid, issues, suggestions]
+  - id: verification_report
+    fields: [id, status: verified|rejected|failed, verifierkind: llm|clingo, reason, evidence, rawoutput]
+  - id: abductive_hypothesis
+    fields: [id, explanation, repairplan]
+  - id: final_answer
+    fields: [id, questionid, answertext]
+  - id: integration_result
+    fields: [id, success, message, updatedprogram]
+  - id: loop_status
+    fields: [id, flowid, iteration, maxiterations, bounded, escaped]
+    note: id field is model-level normalization for artifact uniformity; the Python LoopStatus dataclass does not currently have an id field
 
 orchestrator_artifacts:
-  - knowledge_gap_report
-    description: >
-      Orchestrator-level artifact produced by the ask flow, consumed
-      and updated by the learn flow. NOT a flow artifact — it does not
-      participate in flow-step input/output routing or registry
-      machinery.
-
-      A JSON document on disk containing:
-        - question and committed answer
-        - gap_rationale: freeform text listing missing predicates or
-          topics the answer would benefit from
-        - target_predicates: structured list of "pred/arity" strings
-          extracted from gap_rationale (e.g. ["recipe/2",
-          "demand_cycle/1"]). This is the canonical form used
-          by verify_gap_resolution; gap_rationale is the human-readable
-          source.
-        - target_review: optional dict for human correction without
-          rewriting the original target list. Currently supports:
-            drop: ["pred/arity", ...] — predicates to exclude from
-              resolution checks. The original target_predicates list
-              is preserved for traceability; dropped targets are simply
-              not checked.
-        - status: "open" or "closed"
-            open   = the answer flow identified likely missing KB support
-            closed = all active (non-dropped) targeted predicates now
-                     appear at exact arity in the augmented KB.
-        - resolution: optional dict with:
-            - predicates_checked
-            - predicates_found (exact arity match)
-            - predicates_still_missing (exact arity not found, excluding
-              dropped)
-            - predicates_dropped (excluded via target_review.drop)
-            - related_predicates_found: dict mapping requested pred/arity
-              to a list of same-name predicates with differing arities
-              found in the KB (e.g. "profit/2" -> ["profit/3"])
-            - all_resolved: true iff predicates_still_missing (excluding
-              dropped) is empty
-
-      Lifecycle:
-        ask --gap-report gaps.json    -> status=open, target_predicates
-          populated, resolution empty.
-        Human may optionally add target_review.drop to exclude known-
-          bad targets without losing the original LLM output.
-        learn --fill-gap gaps.json    -> uses target_predicates (minus
-          dropped) as a prioritisation signal during extraction, then
-          runs verify_gap_resolution and updates the file with
-          resolution and possibly status=closed.
-
-      A report that stays open can be reused with a different source
-      text in a subsequent learn call. A closed report is archived (not
-      deleted) so the fact that a gap existed and was resolved remains
-      auditable.
+  - id: knowledge_gap_report
+    fields:
+      - question
+      - committed_answer
+      - gap_rationale
+      - target_predicates
+      - target_review (optional): {drop: [pred/arity]}
+      - status: [open, closed]
+      - resolution (optional):
+          predicates_checked: [pred/arity]
+          predicates_found: [pred/arity]
+          predicates_still_missing: [pred/arity]
+          predicates_dropped: [pred/arity]
+          related_predicates_found: {pred/arity: [pred/arity]}
+          all_resolved: bool
+    lifecycle:
+      ask --gap-report -> status=open
+      learn --fill-gap -> verify_gap_resolution -> resolve -> status=closed|open
 
 invariants:
   - id: I-COMMIT-ANSWER-ONLY-IF-VERIFIED
-    description: >
-      Committed final answers must be verified candidate answers.
     formula: "committed(final_answer) -> verified(candidate_answer)"
-
+    note: pseudo-logic; not yet executable meta-logic in the same vocabulary as DSL-MAP facts
   - id: I-INTEGRATE-KNOWLEDGE-ONLY-IF-VERIFIED
-    description: >
-      Integrated knowledge must be a verified candidate knowledge artifact.
     formula: "integrated(candidate_knowledge) -> verified(candidate_knowledge)"
-
+    note: pseudo-logic; not yet executable meta-logic in the same vocabulary as DSL-MAP facts
   - id: I-CRITIQUE-MUST-TARGET-EXISTING-ARTIFACT
-    description: >
-      Every critique must refer to an existing artifact.
-    formula: "critique(target) -> exists(target)"
-
+    formula: "critique(c) -> exists(a). artifact(a) and targets(c, a)"
+    note: pseudo-logic; not yet executable meta-logic in the same vocabulary as DSL-MAP facts
   - id: I-LOOP-MUST-BE-BOUNDED-OR-ESCAPED
-    description: >
-      Active loops must be bounded or have an escape condition.
     formula: "active(loop) -> bounded(loop) or escaped(loop)"
-
+    note: pseudo-logic; not yet executable meta-logic in the same vocabulary as DSL-MAP facts
   - id: I-QUESTION-TERMINATES
-    description: >
-      Every received question eventually leads to a committed answer or a failure.
-    formula: >
-      question_received(question) ->
-      eventually(answer_committed(question) or question_failed(question))
+    formula: "question_received(q) -> eventually(answer_committed(q) or question_failed(q))"
+    note: pseudo-logic; not yet executable meta-logic in the same vocabulary as DSL-MAP facts
 
 primitives:
-  - generate
-  - generate_knowledge
-  - critique
-  - verify_answer
-  - verify_knowledge
-  - abduce_answer
-  - abduce_knowledge
-  - revise_answer
-  - revise_knowledge
-  - integrate
-  - commit
-  - fail
-  - answer
-
-primitive_descriptions:
   - id: generate
-    description: >
-      Propose a candidate_answer from a question and the current knowledge_base.
-      LLM-backed. Python assigns the artifact id.
-      The rationale field MUST also list any KB facts, predicates (as
-      pred/arity), or topic areas that are MISSING and would improve the
-      answer. This creates the gap signal that is surfaced as a
-      knowledge_gap_report at the CLI level.
+    description: LLM → candidate_answer. rationale field MUST list missing predicates/topics (gap signal).
   - id: generate_knowledge
-    description: >
-      Propose a candidate_knowledge (an additive ASP fragment) by extracting
-      and structuring facts from an external_source_text. Uses the current
-      knowledge_base as vocabulary guide. LLM-backed. Python assigns the
-      artifact id.
-      The candidate MUST NOT include #show directives — they are query-
-      specific and added per-run, not stored in the KB.
-      The candidate MUST NOT restate existing KB facts or rules. Output
-      only ADDITIVE new content.
-      Optionally accepts an external gap_context (from a knowledge_gap_report)
-      as a prioritisation signal. When present, the LLM biases extraction
-      toward facts and rules that match the missing predicates or topics
-      listed. The gap_context is a hint, not a hard constraint: the
-      generated candidate must still remain grounded in the source text
-      and merged-coherent with the KB. If the source text does not
-      contain relevant data for a named predicate, the LLM should not
-      fabricate it.
+    description: LLM from external_source_text + kb → additive candidate_knowledge. No #show, no KB restatement. Optional gap_context as prioritisation hint.
+  - id: critique
+    description: Produce abductive_hypothesis + critique targeting existing artifact.
   - id: verify_answer
-    description: >
-      Verify a candidate_answer against the knowledge_base using an LLM.
-      Returns a VerificationReport with verifier_kind="llm".
+    description: LLM checks candidate_answer against KB. Returns verification_report.
   - id: verify_knowledge
-    description: >
-      Verify the MERGED program (knowledge_base ⊕ candidate_knowledge) using
-      Clingo. "Verified" means the combined program is satisfiable. A
-      candidate that is locally satisfiable but contradicts existing KB
-      facts is rejected because the merged program is unsatisfiable.
-      Returns a VerificationReport with verifier_kind="clingo".
-      Note: the solo solve may fail to ground if the candidate references
-      KB-only predicates. This is treated as expected and does not block
-      merged verification. The merged program must still be satisfiable
-      for the candidate to pass.
+    description: Clingo checks merged satisfiability of KB ⊕ candidate. Solo grounding fail on KB predicates is expected — proceed to merged check. Returns verification_report.
   - id: abduce_answer
-    description: >
-      Produce an AbductiveHypothesis + Critique explaining why a candidate
-      answer was rejected or failed, plus a concrete repair plan. Critique
-      targets an existing artifact (I-CRITIQUE-MUST-TARGET-EXISTING-ARTIFACT).
-      LLM-backed.
   - id: abduce_knowledge
-    description: >
-      Produce an AbductiveHypothesis + Critique explaining why a candidate
-      knowledge fragment was rejected or failed. The critique targets an
-      existing artifact. LLM-backed.
   - id: revise_answer
-    description: >
-      Produce a NEW CandidateAnswer (immutable snapshot, new artifact id)
-      using the abductive hypothesis and critique of the previous candidate.
-      LLM-backed.
+    description: Produce new immutable CandidateAnswer from hypothesis + critique.
   - id: revise_knowledge
-    description: >
-      Produce a NEW CandidateKnowledge (immutable snapshot, new artifact id)
-      that addresses the critique of the previous candidate. The candidate
-      is an additive ASP fragment; the LLM is expected to drop or rewrite
-      facts that would contradict the existing KB.
-      The revised candidate MUST NOT include #show directives and MUST NOT
-      restate existing KB facts. Output only the changed or new fragment.
-      LLM-backed.
+    description: Produce new immutable CandidateKnowledge. No #show, no KB restatement.
   - id: integrate
-    description: >
-      Apply a verified CandidateKnowledge program to the existing
-      KnowledgeBase and produce a NEW immutable KnowledgeBase snapshot.
-      Enforces I-INTEGRATE-KNOWLEDGE-ONLY-IF-VERIFIED. The new KB carries
-      provenance metadata (e.g. last_integrated_candidate) so successive
-      integrations are auditable.
-      Before merging, a redundancy check is performed: if every non-comment
-      line of the candidate already exists verbatim in the KB, the merge is
-      skipped and the result reports the candidate as redundant. This
-      prevents silent duplication of already-known facts.
+    description: Apply verified candidate → new immutable KB snapshot. Redundancy check: skip if all lines already exist verbatim in KB.
   - id: commit
-    description: >
-      Promote a verified CandidateAnswer to a FinalAnswer. Enforces
-      I-COMMIT-ANSWER-ONLY-IF-VERIFIED.
+    description: Promote verified CandidateAnswer to FinalAnswer.
   - id: fail
-    description: >
-      Raise FlowFailed to terminate a flow on iterations_exceeded or
-      unrecoverable_verification_failure.
+    description: Raise FlowFailed.
   - id: answer
-    description: >
-      Embedded inside generate: the answer text is part of CandidateAnswer.
+    description: Text field inside CandidateAnswer.
 
 orchestrator_utilities:
   - id: verify_gap_resolution
     description: >
-      Orchestrator-level check, not a flow primitive. Given a
-      knowledge_gap_report and an augmented KnowledgeBase, read the
-      target_predicates list (minus any targets in
-      target_review.drop), scan the KB's ASP program for occurrences
-      of those predicate names as head-of-rule atoms or fact
-      predicates, and produce a resolution dict:
-        predicates_checked: ["recipe/2", ...]
-        predicates_found (exact arity match): ["recipe/2", ...]
-        predicates_still_missing (exact arity not found): ["profit/2"]
-        predicates_dropped: ["something_else/1"]  — excluded via
-          target_review.drop, not checked
-        related_predicates_found: same-name predicates with differing
-          arities found in the KB, e.g.
-          {"profit/2": ["profit/3"]}
-          Empty dict when no drift exists.
-        all_resolved: true/false  — true iff predicates_still_missing
-          (excluding dropped) is empty
-      Deterministic KB-text scan using ASP predicate-name extraction
-      (regex-based, looking for token-pattern heads in the program
-      string). Not LLM-backed, not Clingo-solver-backed.
-
-      Arity-drift reporting: For each requested pred/arity, if the
-      exact arity is not found, the check scans for the same
-      predicate name with any other arity in the KB. Those are
-      recorded in related_predicates_found. This is purely
-      informational — exact arity match remains the resolution
-      criterion. It surfaces schema evolution (e.g. gap asked for
-      profit/2 but the KB learned profit/3 with richer range data)
-      without weakening the formal contract.
-
-      The semantics of "resolved" are deliberately shallow: a predicate
-      is considered found if its name appears at the correct arity
-      anywhere in the augmented KB text. This does NOT verify that the
-      predicate is meaningfully instantiated for the original question.
-      Deeper resolution (example-instance thresholds, question re-answer
-      evaluation) is deferred to v2.2.
-
-      If all_resolved is true, the knowledge_gap_report's status is set
-      to "closed". The gap file on disk is updated in place so the
-      record is portable. A closed gap report is archived (not deleted)
-      so the fact that a gap existed and was resolved remains auditable.
-      An open report can be reused with a different source text.
-
-      CLI wording for a partial-resolution case:
-        recipe/2 — resolved
-        material_cost/3 — resolved
-        profit/2 — exact target missing
-          related predicate found with different arity: profit/3
+      Schema-presence check. Given target_predicates (minus target_review.drop),
+      scan KB for exact pred/arity as head-of-rule or fact. Deterministic text scan
+      (regex over KB program string). Not LLM-backed, not Clingo-backed.
+      Reports: found, still_missing, dropped, related_predicates_found
+      (same name, different arity — arity-drift detection). Does NOT verify
+      semantic completeness. all_resolved=true iff still_missing (excl. dropped) empty.
 
 guards:
   - id: G-VERIFICATION-FAILURE-RECOVERABLE
-    description: >
-      True when a verification_report with status "failed" is recoverable
-      via the revision loop. Implemented as is_recoverable_failure(verification_report).
     expression: "is_recoverable_failure(verification_report)"
-
   - id: G-VERIFICATION-FAILURE-UNRECOVERABLE
-    description: >
-      True when a verification_report with status "failed" is unrecoverable
-      and the flow should terminate. Implemented as not is_recoverable_failure(verification_report).
     expression: "not is_recoverable_failure(verification_report)"
 
 flows:
-  answer_question:
-    input:
-      - question
-      - knowledge_base
-    output:
-      - final_answer
+  - id: answer_question
+    input: [question, knowledge_base]
+    output: [final_answer]
     max_iterations: 3
-
     steps:
       - id: T-ANSWER-GENERATE
-        kind: step
         role: proposer
         primitive: generate
-        input:
-          - question
-          - knowledge_base
-        output:
-          - candidate_answer
-
+        input: [question, knowledge_base]
+        output: [candidate_answer]
       - id: C-ANSWER-VERIFY
-        kind: step
         role: verifier
         primitive: verify_answer
-        input:
-          - candidate_answer
-          - knowledge_base
-        output:
-          - verification_report
-
+        input: [candidate_answer, knowledge_base]
+        output: [verification_report]
       - id: D-ANSWER-VERIFIED
         kind: decision
         branches:
@@ -406,295 +161,129 @@ flows:
             goto: T-ANSWER-ABDUCE
           - condition: "verification_report.status == failed and G-VERIFICATION-FAILURE-UNRECOVERABLE"
             goto: F-ANSWER-FAILED
-
       - id: T-ANSWER-ABDUCE
-        kind: step
         role: abductive_revisor
         primitive: abduce_answer
-        input:
-          - question
-          - knowledge_base
-          - candidate_answer
-          - verification_report
-        output:
-          - abductive_hypothesis
-          - critique
-
+        input: [question, knowledge_base, candidate_answer, verification_report]
+        output: [abductive_hypothesis, critique]
       - id: T-ANSWER-REVISE
-        kind: step
         role: proposer
         primitive: revise_answer
-        input:
-          - candidate_answer
-          - abductive_hypothesis
-          - critique
-        output:
-          - candidate_answer
-        metadata:
-          artifact_identity: immutable_snapshot
-          id_assignment: python_generated
+        input: [candidate_answer, abductive_hypothesis, critique]
+        output: [candidate_answer]
         loop_to: C-ANSWER-VERIFY
-
       - id: T-ANSWER-COMMIT
-        kind: step
         role: orchestrator
         primitive: commit
-        input:
-          - candidate_answer
-          - verification_report
-        output:
-          - final_answer
-        ensures:
-          - I-COMMIT-ANSWER-ONLY-IF-VERIFIED
-
+        input: [candidate_answer, verification_report]
+        output: [final_answer]
+        ensures: I-COMMIT-ANSWER-ONLY-IF-VERIFIED
       - id: F-ANSWER-FAILED
         kind: failure
-        when:
-          - "iterations_exceeded"
-          - "unrecoverable_verification_failure"
+        conditions: [iterations_exceeded, unrecoverable_verification_failure]
 
-  integrate_knowledge:
-    input:
-      - candidate_knowledge
-      - knowledge_base
-      - auto_revise (optional; default True. When False, a rejected
-          candidate triggers immediate flow failure instead of entering
-          the abduce/revise loop. Used for hand-written programs where
-          conflicts should be surfaced to the user rather than auto-fixed.)
-    output:
-      - integration_result
-      - knowledge_base
+  - id: integrate_knowledge
+    input: [candidate_knowledge, knowledge_base, auto_revise (optional, default true)]
+    output: [integration_result, knowledge_base]
     max_iterations: 3
-
     steps:
       - id: T-KNOWLEDGE-VERIFY
-        kind: step
         role: verifier
         primitive: verify_knowledge
-        solver: clingo
-        input:
-          - candidate_knowledge
-          - knowledge_base
-        output:
-          - verification_report
-        semantics: >
-          Solve the merged program (knowledge_base ⊕ candidate_knowledge).
-          Map solver outcome to VerificationReport.status:
-            ok=False                              -> "failed"   (clingo transport/runtime error)
-            ok=True, merged satisfiable=True     -> "verified" (models go to evidence)
-            ok=True, merged satisfiable=False    -> "rejected" (the candidate contradicts existing KB,
-                                                       or is self-contradictory; the LLM revisor will
-                                                       see the clingo error in raw_output and revise)
-
+        input: [candidate_knowledge, knowledge_base]
+        output: [verification_report]
+        semantics: Solve merged (kb ⊕ candidate). ok=False→failed, sat→verified, unsat→rejected
       - id: D-KNOWLEDGE-VERIFIED
         kind: decision
         branches:
           - condition: "verification_report.status == verified"
             goto: T-KNOWLEDGE-INTEGRATE
-          - condition: "verification_report.status == rejected"
+          - condition: "verification_report.status == rejected and auto_revise == true"
             goto: T-KNOWLEDGE-ABDUCE
-            semantics: >
-              When auto_revise=False, this branch is overridden: a rejected
-              candidate goes to F-KNOWLEDGE-FAILED instead of entering the
-              abduce/revise loop. The failure message includes the rejection
-              reason so the user can resolve the conflict manually.
+          - condition: "verification_report.status == rejected and auto_revise == false"
+            goto: F-KNOWLEDGE-FAILED
           - condition: "verification_report.status == failed and G-VERIFICATION-FAILURE-RECOVERABLE"
             goto: T-KNOWLEDGE-ABDUCE
           - condition: "verification_report.status == failed and G-VERIFICATION-FAILURE-UNRECOVERABLE"
             goto: F-KNOWLEDGE-FAILED
-
       - id: T-KNOWLEDGE-ABDUCE
-        kind: step
         role: abductive_revisor
         primitive: abduce_knowledge
-        input:
-          - candidate_knowledge
-          - knowledge_base
-          - verification_report
-        output:
-          - abductive_hypothesis
-          - critique
-        semantics: >
-          When the verification report is a merged-coherence rejection, the
-          revisor receives the clingo error in raw_output and is expected to
-          identify the conflicting fragment and either drop or rewrite it.
-          In v2.1 the candidate itself is expected to absorb the rewrite
-          (additive only); the existing KB is never mutated by this step.
-
+        input: [candidate_knowledge, knowledge_base, verification_report]
+        output: [abductive_hypothesis, critique]
       - id: T-KNOWLEDGE-REVISE
-        kind: step
         role: proposer
         primitive: revise_knowledge
-        input:
-          - candidate_knowledge
-          - abductive_hypothesis
-          - critique
-        output:
-          - candidate_knowledge
-        metadata:
-          artifact_identity: immutable_snapshot
-          id_assignment: python_generated
+        input: [candidate_knowledge, abductive_hypothesis, critique]
+        output: [candidate_knowledge]
         loop_to: T-KNOWLEDGE-VERIFY
-
       - id: T-KNOWLEDGE-INTEGRATE
-        kind: step
         role: knowledge_store
         primitive: integrate
-        input:
-          - candidate_knowledge
-          - verification_report
-          - knowledge_base
-        output:
-          - integration_result
-          - knowledge_base
-        ensures:
-          - I-INTEGRATE-KNOWLEDGE-ONLY-IF-VERIFIED
-        semantics: >
-          Apply the verified additive candidate to the existing KB and
-          produce a NEW immutable KnowledgeBase snapshot (in-memory). The
-          in-memory prior KB reference held by the caller is not mutated;
-          both objects coexist. The new KB records last_integrated_candidate
-          (and any other provenance metadata) so the integration is
-          auditable.
-
-          Persistence to disk is the responsibility of the orchestrator /
-          CLI, not this step. The current CLI default is to overwrite the
-          source KB file in place on successful integration (auditable via
-          git diff); an --out-kb flag keeps the source and writes the
-          augmented copy elsewhere. Integration failure never writes to
-          disk. See the purpose block for the full persistence policy.
-
+        input: [candidate_knowledge, verification_report, knowledge_base]
+        output: [integration_result, knowledge_base]
+        ensures: I-INTEGRATE-KNOWLEDGE-ONLY-IF-VERIFIED
+        postcondition: new_kb.aspprogram == kb.aspprogram ⊕ candidate_knowledge.aspprogram (non-redundant only)
+        # ⊕ is notation for textual append of verified non-redundant additive fragment to KB program string. NOT a formal merge operator; reflects current Python behavior, not a stronger semantic guarantee.
       - id: F-KNOWLEDGE-FAILED
         kind: failure
-        when:
-          - "iterations_exceeded"
-          - "unrecoverable_verification_failure"
+        conditions: [iterations_exceeded, unrecoverable_verification_failure]
+        semantics: auto_revise=false rejection also leads here; see D-KNOWLEDGE-VERIFIED branch.
 
 flows_compositions:
-  # A composition is a higher-level user-facing chain that composes one or
-  # more of the flows above plus primitive invocations. Compositions live at
-  # the orchestrator / CLI layer; they are not reified as new flows because
-  # they share all the same step semantics, guards, and invariants.
   - id: learn
-    description: >
-      The user-facing learning loop. Read a source text that contains
-      (typically) both a question and the research material that answers
-      it; extract a CandidateKnowledge from the text; integrate it into
-      the existing KB with the full v2.1 merged-coherence verification;
-      persist the augmented KB (default: overwrite source KB in place);
-      then optionally re-ask the question against the augmented KB.
-
-      New in v2.1: optionally accepts a knowledge_gap_report (produced by
-      ask --gap-report). When present, the generate_knowledge step targets
-      the missing predicates (from target_predicates) identified in the
-      gap report, creating a directed extraction flow. After integration and persist,
-      the learn composition runs gap-resolution verification: it extracts
-      the missing predicate names from the gap report, scans the augmented
-      KB, and if all are found, sets the gap report status to "closed".
-      The gap file on disk is updated in place. Gaps that remain unfound
-      keep the report open for a future learn pass with a different source
-      text. A gap report in "closed" state can be archived (not deleted)
-      so the record of what was learned persists.
-
-      v2.1 uses a 3-layer interpretation of knowledge gaps:
-        1. Answer gap signal:  "this answer would improve if KB had X"
-           — heuristic, LLM-based, captured in generate's rationale.
-        2. Learn targeting:     "prefer extracting facts about X"
-           — heuristic but useful, passed as gap_context to
-           generate_knowledge.
-        3. Resolution check:    "predicate name X now appears in KB text"
-           — deterministic, shallow: checks textual presence only, does
-           not evaluate semantic completeness for the original question.
+    description: Orchestrator composition. generate_knowledge → integrate_knowledge → persist → resolve_gaps → optional re-ask.
     input:
       - knowledge_base
       - external_source_text
-      - question (optional; if absent, the first H1 in the source text is used)
-      - knowledge_gap_report (optional; when provided, its
-          target_predicates are passed as gap_context to
-          generate_knowledge for targeted extraction; gap_rationale
-          is also included as descriptive context).
+      - question (optional; if absent, CLI extracts from source H1 or skips re-ask)
+      - knowledge_gap_report (optional; target_predicates → gap_context for generate_knowledge)
     output:
       - knowledge_base (augmented)
-      - final_answer (if re-ask step runs)
+      - final_answer (if re-ask runs)
     steps:
       - id: T-LEARN-GENERATE
-        kind: step
         role: proposer
         primitive: generate_knowledge
-        input:
-          - external_source_text
-          - knowledge_base
-          - gap_context (optional; from knowledge_gap_report.target_predicates,
-              with gap_rationale as optional descriptive/backup context)
-        output:
-          - candidate_knowledge
+        input: [external_source_text, knowledge_base, gap_context (optional)]
+        output: [candidate_knowledge]
       - id: T-LEARN-INTEGRATE
-        kind: step
-        role: orchestrator
         calls_flow: integrate_knowledge
-        input:
-          - candidate_knowledge (from T-LEARN-GENERATE)
-          - knowledge_base
-        output:
-          - integration_result
-          - knowledge_base (augmented)
+        input: [candidate_knowledge, knowledge_base]
+        output: [integration_result, knowledge_base (augmented)]
       - id: T-LEARN-PERSIST
-        kind: step
         role: orchestrator
-        semantics: >
-          Write the augmented KB to disk. Default: overwrite the source
-          KB file in place (auditable via git diff). Optional --out-kb
-          flag keeps the source file and writes the augmented copy
-          elsewhere. Skipped entirely on integration failure.
+        semantics: Write augmented KB to disk. Default: overwrite --kb file. --out-kb writes elsewhere. Skipped on integration failure.
       - id: T-LEARN-RESOLVE-GAP
-        kind: step
-        role: orchestrator
         utility: verify_gap_resolution
         optional: true
-        skipped_when:
-          - "no knowledge_gap_report was provided"
-          - "integration failed"
-        input:
-          - knowledge_gap_report (the one provided as input)
-          - knowledge_base (augmented, from T-LEARN-INTEGRATE)
-        output:
-          - knowledge_gap_report (updated: status set to closed if all
-              missing predicates now appear in the augmented KB;
-              predicates_still_missing listed if any remain unfound)
-        semantics: >
-          After a successful integration, read the target_predicates list
-          from the gap report (or fall back to parsing pred/n patterns
-          from gap_rationale), scan the augmented KB program for
-          occurrences of each predicate as a head-of-rule or fact at the
-          correct arity. If all are found, set the gap report status to
-          "closed" and update the file on disk with the resolution dict.
-          For any predicate missing at exact arity, also scan for the
-          same predicate name with other arities and record those as
-          related_predicates_found (arity-drift reporting). If some
-          remain missing, keep status="open" and record which ones plus
-          any related variants. The user can then supply another source
-          text and run learn --fill-gap again against the same gap file
-          to try again.
+        skipped_when: [no knowledge_gap_report provided, integration failed]
+        input: [knowledge_gap_report, knowledge_base (augmented)]
+        output: [knowledge_gap_report (updated)]
       - id: T-LEARN-REASK
-        kind: step
-        role: orchestrator
         calls_flow: answer_question
         optional: true
-        skipped_when:
-          - "no question was provided and no H1 was found in the source text"
-          - "--skip-reask flag was passed"
-        input:
-          - question
-          - knowledge_base (the augmented one)
-        output:
-          - final_answer
-          - knowledge_gap_report (optional; when the --gap-report flag is
-              passed to the learn command, the re-ask's committed answer
-              is also surfaced as a gap report, capturing any new missing
-              predicates that may have appeared after integration)
-    invariants_used:
-      - I-INTEGRATE-KNOWLEDGE-ONLY-IF-VERIFIED
-      - I-COMMIT-ANSWER-ONLY-IF-VERIFIED
-      - I-CRITIQUE-MUST-TARGET-EXISTING-ARTIFACT
-      - I-LOOP-MUST-BE-BOUNDED-OR-ESCAPED
-      - I-QUESTION-TERMINATES
+        skipped_when: [no question and no H1 in source, --skip-reask passed]
+        input: [question, knowledge_base (augmented)]
+        output: [final_answer, knowledge_gap_report (optional; from --gap-report flag)]
+
+deferred_v22:
+  artifacts:
+    - solver_result       # raw Clingo output including unsat core
+    - revision_plan       # retractions + insertions set
+    - minimal_conflict_core # minimal UNSAT subset from Clingo
+    - predicate_evolution_map # arity/schema migrations
+    - session_state       # multi-shot solving state
+    - kb_commit           # typed persistence snapshot
+  primitives:
+    - analyze_conflict    # given UNSAT merged, produce MUC
+    - propose_revision    # given conflict, propose retractions/rewrites
+    - apply_revision      # execute revision_plan, produce new KB
+    - verify_gap_semantics # re-answer question to confirm gap closure
+    - invent_predicate    # given arity drift, propose unified schema
+    - rewrite_schema      # migrate old predicate uses to new schema
+  sequence:
+    - v2.2a: retraction + MUC analysis (analyze_conflict, propose_revision, apply_revision)
+    - v2.2b: exception/default rewriting + abnormality predicates
+    - v2.2c: predicate invention + schema migration (invent_predicate, rewrite_schema)
+    - v2.2d: multi-shot session state (session_state, solver_result)
