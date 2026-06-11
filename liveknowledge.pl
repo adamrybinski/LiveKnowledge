@@ -50,6 +50,8 @@ call_llm(Prompt, Response) :-
     ).
 
 
+
+
 % Example usage
 hello_world :-
     load_env,
