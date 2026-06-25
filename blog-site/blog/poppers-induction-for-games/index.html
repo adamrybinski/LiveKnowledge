@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Popper (ILP) for Game Rules | Adam Rybinski</title>
+  <meta name="description" content="How to bridge logic to games: induce Prolog rules from examples with Popper (ILP) and execute them in production systems.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
+  <link rel="canonical" href="https://adamrybinski.com/blog/poppers-induction-for-games/">
+  <meta property="og:title" content="Popper (ILP) for Game Rules">
+  <meta property="og:description" content="Induce rules from examples, verify them, and ship them without rewriting them by hand.">
+  <meta property="og:url" content="https://adamrybinski.com/blog/poppers-induction-for-games/">
+  <meta name="twitter:card" content="summary">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.75; }
+    @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #e2e8f0; } a { color: #60a5fa; } code { background:#1e293b; } pre { background:#1e293b; } }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 { font-size: 1.9rem; letter-spacing: -0.02em; }
+    h2 { font-size: 1.25rem; margin-top: 2.2rem; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2rem 0; }
+    .back { margin-bottom: 2rem; display: inline-block; font-size: 0.9rem; }
+    .footer { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-top: 3rem; border-top: 1px solid #e2e8f0; padding-top: 1.5rem; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }
+    code { background: #f1f5f9; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <a class="back" href="/">&larr; Adam Rybinski</a> &middot; <a href="/work-with-me/"><strong>Work with me</strong></a>
+
+  <h1>Popper (ILP) for Game Rules</h1>
+  <p style="color:#666;">Bridging logic to games: induce rules from examples and execute them in production.</p>
+
+  <p>
+    Game and betting systems are full of rules: eligibility, pricing tiers, catalog mapping, track-fit, limits,
+    promotions, reward logic. Teams often hard-code these rules in application code and then spend months
+    debugging edge cases and “why does the user qualify” support tickets.
+  </p>
+
+  <p>
+    A different approach is to treat rule design as <strong>induction</strong>.
+    With <strong>Inductive Logic Programming (ILP)</strong>, you specify examples of what should be allowed or denied,
+    constrain the search space, and let the system synthesise the smallest set of logic rules that match the examples.
+  </p>
+
+  <h2>The core pattern</h2>
+  <p>
+    Popper learns Prolog clauses from <code>pos</code>/<code>neg</code> examples using background knowledge.
+    You keep a clean separation:
+  </p>
+  <ul>
+    <li><strong>Ontology / axioms</strong>: stable vocabulary and deterministic facts</li>
+    <li><strong>Examples</strong>: what must be true / false</li>
+    <li><strong>Bias</strong>: what rules are allowed to exist</li>
+    <li><strong>Learned hypothesis</strong>: the induced rules (pinned, versioned)</li>
+  </ul>
+
+  <h2>A tiny example</h2>
+  <pre><code>% exs.pl
+pos(eligible(player_a)).
+neg(eligible(player_b)).
+
+% bk.pl (background knowledge)
+has_age(player_a, 22).
+has_age(player_b, 16).
+
+% desired learned rule (simplified)
+eligible(P) :- has_age(P, A), A &gt;= 18.
+</code></pre>
+
+  <p>
+    The value is not the toy threshold. The value is that the rules become:
+    <strong>reviewable</strong>, <strong>testable</strong>, and <strong>auditable</strong> — and they evolve by adding counterexamples,
+    not by “patching if statements.”
+  </p>
+
+  <h2>Why this matters for games and betting</h2>
+  <ul>
+    <li><strong>Dispute resolution</strong>: you can show the rule and the facts that triggered it.</li>
+    <li><strong>Safety</strong>: hard boundaries live in a rulebook with conformance tests.</li>
+    <li><strong>Iteration speed</strong>: adjust examples and re-induce without rewriting application code.</li>
+    <li><strong>Portability</strong>: the same learned rulebook can drive backend decisions and offline analysis.</li>
+  </ul>
+
+  <h2>Connecting to production</h2>
+  <p>
+    The pragmatic production approach is to keep a small “bridge” that loads pinned learned rules and runs
+    queries over ground facts. That avoids rewriting the learned logic into another language and reduces translation bugs.
+  </p>
+
+  <hr>
+
+  <p>
+    Related reading:
+    <a href="/blog/gamification-cognitive-science/">Gamification + Cognitive Science</a>,
+    <a href="/blog/neuro-symbolic/">Neuro-Symbolic AI</a>.
+  </p>
+
+  <div class="footer">
+    <a href="/">Adam Rybinski</a> &mdash; <a href="https://linkedin.com/in/adam-rybinski">LinkedIn</a>
+  </div>
+</body>
+</html>
