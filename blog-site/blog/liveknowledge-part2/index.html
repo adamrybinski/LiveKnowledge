@@ -88,7 +88,7 @@
 
   <p>That system lives on the command line. This post is about what happens when you move the same <em>shape</em> of loop into the browser — and add <strong>inductive rule learning</strong> on top.</p>
 
-  <p>The result is <a href="https://github.com/adamrybinski/webilp"><strong>WebILP</strong></a>: a single-page app that runs Popper’s Alan encoding via <a href="https://github.com/domoritz/clingo-wasm">Clingo WASM</a>, tests candidates with <a href="https://github.com/guregu/trealla-js">Trealla Prolog</a>, and uses an OpenAI-compatible LLM API for the LiveKnowledge-style grounding steps.</p>
+  <p>The result is <strong><a href="https://app.livelogic.dev">WebILP</a></strong> (<a href="https://github.com/adamrybinski/webilp">source</a>): a single-page app that runs Popper’s Alan encoding via <a href="https://github.com/domoritz/clingo-wasm">Clingo WASM</a>, tests candidates with <a href="https://github.com/guregu/trealla-js">Trealla Prolog</a>, and uses an OpenAI-compatible LLM API for the LiveKnowledge-style grounding steps.</p>
 
   <hr>
 
@@ -227,6 +227,14 @@
 
   <h2>Try it</h2>
 
+  <div class="cta-box">
+    <p class="cta-title">Open the live app</p>
+    <p class="cta-desc">No install — runs in your browser. Add an LLM key in Setup, then follow the flow.</p>
+    <a href="https://app.livelogic.dev" style="display:inline-block; background:#2563eb; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem;">app.livelogic.dev →</a>
+  </div>
+
+  <p>Or run locally:</p>
+
   <pre>git clone https://github.com/adamrybinski/webilp.git
 cd webilp
 npm install
@@ -249,7 +257,8 @@ npm start</pre>
   <div class="cta-box">
     <p class="cta-title">WebILP on GitHub</p>
     <p class="cta-desc">Browser ILP + LiveKnowledge-style grounding. Issues and PRs welcome.</p>
-    <a href="https://github.com/adamrybinski/webilp" style="display:inline-block; background:#2563eb; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem;">github.com/adamrybinski/webilp →</a>
+    <a href="https://app.livelogic.dev" style="display:inline-block; background:#2563eb; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem; margin-right:0.5rem;">Open app →</a>
+    <a href="https://github.com/adamrybinski/webilp" style="display:inline-block; background:#1e293b; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem;">GitHub →</a>
   </div>
 
   <hr>
@@ -265,7 +274,7 @@ npm start</pre>
   <hr>
 
   <div class="footer">
-    <a href="/">Adam Rybinski</a> &mdash; <a href="https://linkedin.com/in/adam-rybinski">LinkedIn</a> &mdash; <a href="https://github.com/adamrybinski/LiveKnowledge">LiveKnowledge</a> &mdash; <a href="https://github.com/adamrybinski/webilp">WebILP</a><br>
+    <a href="/">Adam Rybinski</a> &mdash; <a href="https://linkedin.com/in/adam-rybinski">LinkedIn</a> &mdash; <a href="https://github.com/adamrybinski/LiveKnowledge">LiveKnowledge</a> &mdash; <a href="https://app.livelogic.dev">WebILP app</a> &mdash; <a href="https://github.com/adamrybinski/webilp">GitHub</a><br>
     <span style="font-size:0.8rem;"><a href="/blog/liveknowledge/">← Part 1: Architecture</a> &middot; Part 2: WebILP in the browser</span>
   </div>
 
