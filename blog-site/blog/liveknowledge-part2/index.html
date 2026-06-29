@@ -35,12 +35,39 @@
     li { margin-bottom: 0.5rem; }
     .diagram { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0; font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.6; white-space: pre; overflow-x: auto; }
     @media (prefers-color-scheme: dark) { .diagram { background: #0f172a; border-color: #1e293b; } }
-    .series-nav { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.9rem 1.1rem; margin: 0 0 1.5rem; font-size: 0.92rem; }
-    @media (prefers-color-scheme: dark) { .series-nav { background: #0f172a; border-color: #1e293b; } }
-    .series-nav strong { display: block; margin-bottom: 0.35rem; }
+    .series-nav { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.9rem 1.1rem; margin: 0 0 1.5rem; font-size: 0.92rem; color: #1a1a1a; }
+    .series-nav strong { display: block; margin-bottom: 0.35rem; color: #1a1a1a; }
     .footer { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-top: 3rem; border-top: 1px solid #e2e8f0; padding-top: 1.5rem; }
     table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
     th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #e2e8f0; }
+    .cta-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.5rem 0;
+      text-align: center;
+      color: #1a1a1a;
+    }
+    .cta-box .cta-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #1a1a1a;
+    }
+    .cta-box .cta-desc {
+      font-size: 0.9rem;
+      color: #475569;
+      margin-bottom: 0.8rem;
+    }
+    @media (prefers-color-scheme: dark) {
+      .cta-box { background: #f8fafc; border-color: #e2e8f0; color: #1a1a1a; }
+      .cta-box .cta-title { color: #1a1a1a; }
+      .cta-box .cta-desc { color: #475569; }
+      .series-nav { background: #f8fafc; border-color: #e2e8f0; color: #1a1a1a; }
+      .series-nav strong { color: #1a1a1a; }
+      .series-nav a { color: #2563eb; }
+    }
   </style>
 </head>
 <body>
@@ -219,9 +246,9 @@ npm start</pre>
 
   <p>Or skip the LLM: <strong>Setup → Load Popper example → grandparent-maternal → Induce</strong> to see pure symbolic induction with no API key.</p>
 
-  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.2rem; margin:1.5rem 0; text-align:center;">
-    <p style="font-size:1rem; font-weight:600; margin-bottom:0.5rem;">WebILP on GitHub</p>
-    <p style="font-size:0.9rem; color:#64748b; margin-bottom:0.8rem;">Browser ILP + LiveKnowledge-style grounding. Issues and PRs welcome.</p>
+  <div class="cta-box">
+    <p class="cta-title">WebILP on GitHub</p>
+    <p class="cta-desc">Browser ILP + LiveKnowledge-style grounding. Issues and PRs welcome.</p>
     <a href="https://github.com/adamrybinski/webilp" style="display:inline-block; background:#2563eb; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem;">github.com/adamrybinski/webilp →</a>
   </div>
 

@@ -41,12 +41,49 @@
     .ref { font-size: 0.88rem; color: #64748b; padding-left: 2em; text-indent: -2em; margin-bottom: 0.6rem; }
     .ref a { color: #2563eb; }
     @media (prefers-color-scheme: dark) { .ref a { color: #60a5fa; } }
+    .series-nav {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.9rem 1.1rem;
+      margin: 0 0 1.5rem;
+      font-size: 0.92rem;
+      color: #1a1a1a;
+    }
+    .series-nav strong { display: block; margin-bottom: 0.35rem; color: #1a1a1a; }
     .footer { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-top: 3rem; border-top: 1px solid #e2e8f0; padding-top: 1.5rem; }
+    .cta-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.5rem 0;
+      text-align: center;
+      color: #1a1a1a;
+    }
+    .cta-box .cta-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #1a1a1a;
+    }
+    .cta-box .cta-desc {
+      font-size: 0.9rem;
+      color: #475569;
+      margin-bottom: 0.8rem;
+    }
+    @media (prefers-color-scheme: dark) {
+      .cta-box { background: #f8fafc; border-color: #e2e8f0; color: #1a1a1a; }
+      .cta-box .cta-title { color: #1a1a1a; }
+      .cta-box .cta-desc { color: #475569; }
+      .series-nav { background: #f8fafc; border-color: #e2e8f0; color: #1a1a1a; }
+      .series-nav a { color: #2563eb; }
+    }
   </style>
 </head>
 <body>
 
-  <nav class="series-nav" aria-label="LiveKnowledge series" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:0.9rem 1.1rem; margin:0 0 1.5rem; font-size:0.92rem;">
+  <nav class="series-nav" aria-label="LiveKnowledge series">
     <strong style="display:block; margin-bottom:0.35rem;">LiveKnowledge series</strong>
     <strong>Part 1: Architecture</strong> (you are here)
     &nbsp;·&nbsp;
@@ -258,9 +295,9 @@
   <h3>Multi-Shot Stateful Reasoning</h3>
   <p>Right now, every successful integration overwrites the prior snapshot. For real-time streaming agents, the system will adopt Clingo's <strong>multi-shot solving</strong> <a href="#ref-gebser">[8]</a>, maintaining a persistent, stateful reasoning stream that dynamically injects and toggles <code>#program</code> scenarios without ever re-grounding the entire KB.</p>
 
-  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.2rem; margin:1.5rem 0; text-align:center;">
-    <p style="font-size:1rem; font-weight:600; margin-bottom:0.5rem;">Want this kind of system in your stack?</p>
-    <p style="font-size:0.9rem; color:#64748b; margin-bottom:0.8rem;">I help teams build verifiable knowledge layers with ASP, Prolog, and LLM orchestration.</p>
+  <div class="cta-box">
+    <p class="cta-title">Want this kind of system in your stack?</p>
+    <p class="cta-desc">I help teams build verifiable knowledge layers with ASP, Prolog, and LLM orchestration.</p>
     <a href="/work-with-me/" style="display:inline-block; background:#2563eb; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem;">Work with me →</a>
   </div>
 
