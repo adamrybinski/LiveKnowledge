@@ -858,7 +858,11 @@ Return ONLY a JSON object with this exact shape and NO other text:
 
 Rules:
 - Do NOT include any "id" field. The host will assign a new artifact id.
-- The asp_program MUST be valid clingo syntax (facts, rules, #show directives).
+- The asp_program MUST be valid clingo syntax (facts and rules only).
+- Do NOT include #show directives — they are query-specific and added
+  per-run, not stored in the KB.
+- Do NOT restate existing KB facts or rules. Output only the NEW or
+  CHANGED fragment.
 - Address every issue raised in the critique.
 - No markdown fences, no prose outside JSON.
 """
@@ -878,13 +882,14 @@ Return ONLY a JSON object with this exact shape and NO other text:
 
 Rules:
 - Do NOT include any "id" field. The host will assign a new artifact id.
-- Output ONLY new facts, rules, or #show directives. Do NOT restate the
-  contents of the knowledge base, even as comments.
+- Output ONLY new facts and rules. Do NOT include #show directives — they
+  are query-specific and added per-run, not stored in the KB.
+- Do NOT restate the contents of the knowledge base, even as comments.
+  Output only ADDITIVE facts and rules that are NOT already in the KB.
 - Prefer reusing predicates and constants already present in the knowledge
   base. Only invent new predicates when the text clearly requires them.
 - Every variable in a rule must be safe (bound by a positive atom in the body).
-- Use only valid clingo syntax (facts `pred(args).`, rules `head :- body.`,
-  directives `#show pred/arity.` or `#show pred(args).`).
+- Use only valid clingo syntax (facts `pred(args).`, rules `head :- body.`).
 - Avoid integrity constraints (`:- body.`) unless the text explicitly forbids
   some combination, and even then keep them minimal and well-grounded.
 - Keep the fragment small and grounded in the source text. Do not speculate
@@ -1110,17 +1115,14 @@ def verify_candidate_knowledge(
       - clingo transport/runtime error      -> "failed"
     """
     # Step 1: solve the candidate alone to detect self-contradiction early.
+    # If the candidate references KB-only predicates, solo grounding may
+    # fail — treat that as expected, not a failure.
     solo = clingo_solve(ck.asp_program)
     if not solo.ok:
-        return VerificationReport(
-            id=id_factory(),
-            status="failed",
-            reason=solo.error or "Clingo solve error on candidate alone",
-            evidence="",
-            raw_output=solo.error,
-            verifier_kind="clingo",
-        )
-    if not solo.satisfiable:
+        # Grounding failure likely means candidate references KB predicates.
+        # Skip to merged solve rather than returning failed.
+        pass
+    elif not solo.satisfiable:
         return VerificationReport(
             id=id_factory(),
             status="rejected",
@@ -1444,6 +1446,32 @@ def merge_verified_knowledge(
             updated_program=kb.asp_program,
         ), kb
 
+    # Check for redundancy: if every non-empty, non-comment line in the
+    # candidate already exists verbatim in the KB, skip the merge.
+    candidate_lines = set(
+        line.strip() for line in ck.asp_program.splitlines()
+        if line.strip() and not line.strip().startswith("%")
+        and not line.strip().startswith("#show")
+    )
+    kb_lines = set(
+        line.strip() for line in kb.asp_program.splitlines()
+        if line.strip() and not line.strip().startswith("%")
+    )
+    if candidate_lines and candidate_lines.issubset(kb_lines):
+        logger.info(
+            "Candidate %s is fully redundant — all facts/rules already in KB.",
+            ck.id,
+        )
+        return IntegrationResult(
+            id=id_factory(),
+            success=True,
+            message=(
+                f"Candidate {ck.id} is redundant: all facts and rules "
+                f"already exist in the KB. Nothing added."
+            ),
+            updated_program=kb.asp_program,
+        ), kb
+
     merged_program = (kb.asp_program.rstrip() + "\n\n" + ck.asp_program.strip() + "\n").strip() + "\n"
     # Deliberate design: the integrated KB keeps the same id as the input KB.
     # It is treated as an updated version of the same logical store, not a
@@ -1610,6 +1638,7 @@ def integrate_knowledge(
     client: OpenAI,
     id_factory: Callable[[], str],
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    auto_revise: bool = True,
 ) -> Tuple[IntegrationResult, KnowledgeBase]:
     """
     DSL-MAP: FLOW-INTEGRATE-KNOWLEDGE
@@ -1620,6 +1649,14 @@ def integrate_knowledge(
     """
     iteration = 0
     candidate = candidate_knowledge
+    # Re-assign id from factory to avoid collision with reports
+    if candidate.id and candidate.id.startswith("ck-") and len(candidate.id) <= 6:
+        candidate = CandidateKnowledge(
+            id=id_factory(),
+            asp_program=candidate.asp_program,
+            notes=candidate.notes,
+        )
+    registry.register(candidate)
     while True:
         iteration += 1
         if iteration > max_iterations:
@@ -1658,6 +1695,13 @@ def integrate_knowledge(
             return result, new_kb
 
         if report.status == "rejected":
+            if not auto_revise:
+                fail_flow(
+                    "integrate_knowledge",
+                    f"CONFLICT: candidate contradicts existing KB. "
+                    f"Verification rejected. Reason: {report.reason}. "
+                    f"Set auto_revise=True or resolve the conflict manually before retrying.",
+                )
             pass
         elif report.status == "failed":
             if is_recoverable_failure(report):
@@ -1736,6 +1780,7 @@ class Orchestrator:
         candidate_knowledge: CandidateKnowledge,
         kb: KnowledgeBase,
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
+        auto_revise: bool = True,
     ) -> Tuple[IntegrationResult, KnowledgeBase, ArtifactRegistry]:
         registry = ArtifactRegistry()
         id_factory = make_id_factory("ck")  # candidate_knowledge ids
@@ -1746,6 +1791,7 @@ class Orchestrator:
             client=self.client,
             id_factory=id_factory,
             max_iterations=max_iterations,
+            auto_revise=auto_revise,
         )
         return result, new_kb, registry
 
@@ -1859,8 +1905,14 @@ def main() -> None:
     p_learn.add_argument("--kb", default="kb.lp", help="Path to .lp knowledge base file")
     p_learn.add_argument(
         "--unstructured", default=None,
-        help="Path to source text file. If omitted, uses --fill-gap or falls "
+        help="Path to source text file. If omitted, uses --text or falls "
              "back to unstructured.txt.",
+    )
+    p_learn.add_argument(
+        "--text", default=None,
+        help="Raw text string to extract knowledge from (alternative to "
+             "--unstructured file). Use this to pass pasted content "
+             "directly without creating a file.",
     )
     p_learn.add_argument(
         "--fill-gap", default=None,
@@ -1891,6 +1943,12 @@ def main() -> None:
     p_learn.add_argument(
         "--question-id", default=None,
         help="Override the question artifact id used in the re-ask step.",
+    )
+    p_learn.add_argument(
+        "--gap-report", default=None, nargs="?", const="-",
+        help="Path to write a gap signal JSON file from the re-ask step. "
+             "Pass no argument to print to stdout. "
+             "The file contains missing predicates/topics from the re-asked answer.",
     )
 
     args = parser.parse_args()
@@ -1954,6 +2012,20 @@ def main() -> None:
                 if args.gap_report == "-":
                     print("\n(no gap report: rationale was empty)")
 
+        else:
+            # Auto-surface: even without --gap-report, briefly note any gaps
+            gap_artifact = None
+            for rid in reversed(registry.ids()):
+                a = registry.get(rid)
+                if isinstance(a, CandidateAnswer):
+                    gap_artifact = a
+                    break
+            if gap_artifact and gap_artifact.rationale.strip():
+                target_preds = extract_target_predicates(gap_artifact.rationale)
+                if target_preds:
+                    print(f"\nℹ KB may need predicates: {target_preds}")
+                    print(f"  To generate a gap report: re-run with --gap-report gaps.json")
+
     elif args.cmd == "integrate":
         kb = _load_kb(args.kb)
         with open(args.program_file, "r", encoding="utf-8") as f:
@@ -1972,6 +2044,7 @@ def main() -> None:
                 candidate_knowledge=candidate,
                 kb=kb,
                 max_iterations=args.max_iterations,
+                auto_revise=False,
             )
         except FlowFailed as e:
             logger.error("integrate_knowledge failed: %s", e)
@@ -1983,6 +2056,35 @@ def main() -> None:
         print(f"new_kb_id: {new_kb.id}")
         print(f"updated_program_chars: {len(new_kb.asp_program)}")
         print(f"registry contains {len(registry)} artifacts")
+
+        if result.success:
+            # Resolve output path first (needed by both conflict surface and persist)
+            try:
+                out_kb_path = args.out_kb or args.kb
+            except AttributeError:
+                out_kb_path = args.kb
+
+            # Check registry for any rejections — the revised candidate
+            # succeeded, but the original was rejected. Surface this.
+            rejected_ids = []
+            for rid in registry.ids():
+                a = registry.get(rid)
+                if isinstance(a, VerificationReport) and a.status == "rejected":
+                    rejected_ids.append(rid)
+            if rejected_ids:
+                print(f"\n⚠ CONFLICT DETECTED AND RESOLVED")
+                print(f"  Original candidate was rejected ({len(rejected_ids)} report(s)):")
+                report = registry.get(rejected_ids[-1])
+                print(f"  Reason: {report.reason[:200]}")
+                print(f"  The system auto-revised and integrated a non-conflicting version.")
+                print(f"  Original intent may have been altered — review final KB at {out_kb_path}")
+            else:
+                print(f"  No conflicts detected — candidate integrated directly.")
+
+            # Persist the augmented KB to disk
+            with open(out_kb_path, "w", encoding="utf-8") as f:
+                f.write(new_kb.asp_program)
+            print(f"\naugmented KB written to: {out_kb_path}")
 
     elif args.cmd == "learn":
         # Chain: load text -> generate candidate knowledge -> integrate ->
@@ -2018,10 +2120,12 @@ def main() -> None:
                 print(f"Target predicates: {gap_report_obj.target_predicates}")
             elif gap_context:
                 print(f"Targeting gaps: {gap_context[:200]}...")
-        if not src_path:
+        if not src_path and not args.text:
             src_path = "unstructured.txt"
-
-        source_text = _load_source_text(src_path)
+        if src_path:
+            source_text = _load_source_text(src_path)
+        elif args.text:
+            source_text = args.text
         if not source_text.strip():
             raise SystemExit("Empty source text.")
 
@@ -2145,6 +2249,38 @@ def main() -> None:
                 print(f"\n--- final answer ---\n{final.answer_text}")
                 print(f"\n(final_id={final.id} question_id={final.question_id})")
                 print(f"(ask registry size: {len(ask_registry)})")
+
+                # Optional gap report from re-ask step
+                if args.gap_report is not None:
+                    gap_artifact = None
+                    for rid in reversed(ask_registry.ids()):
+                        a = ask_registry.get(rid)
+                        if isinstance(a, CandidateAnswer):
+                            gap_artifact = a
+                            break
+                    if gap_artifact and gap_artifact.rationale.strip():
+                        gap_text = gap_artifact.rationale
+                        target_preds = extract_target_predicates(gap_text)
+                        report = KnowledgeGapReport(
+                            question=question_text,
+                            committed_answer=final.answer_text,
+                            gap_rationale=gap_text,
+                            target_predicates=target_preds,
+                            status="open",
+                        )
+                        if args.gap_report == "-":
+                            print("\n=== KNOWLEDGE GAP REPORT (re-ask) ===")
+                            print(json.dumps({
+                                "question": report.question,
+                                "target_predicates": report.target_predicates,
+                                "gap_rationale": report.gap_rationale,
+                                "status": report.status,
+                            }, indent=2))
+                        else:
+                            write_gap_report(args.gap_report, report)
+                            print(f"\nGap report written to: {args.gap_report}")
+                            if report.target_predicates:
+                                print(f"Target predicates: {report.target_predicates}")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ cover_image: https://adamrybinski.com/blog/liveknowledge/cover.png
 series: LiveKnowledge
 ---
 
-*Part 1 of a series. Part 2 coming soon — covers semantic gap-completeness, non-monotonic retractions, and multi-shot reasoning.*
+*Part 1 of a series. Continue to [Part 2: WebILP in the browser](https://adamrybinski.com/blog/liveknowledge-part2/) — LLM grounding, Clingo WASM, and Popper induction.*
 
 **LiveKnowledge** is a CLI tool that closes the loop between unstructured text and structured, verifiable knowledge. It combines large language models with Answer Set Programming (via [Clingo](https://potassco.org/clingo/)) to extract, verify, and query facts in an evolving knowledge base. This post covers the v2.1 architecture — what it does, why it works, and where it sits in the broader neuro-symbolic landscape.
 
@@ -184,4 +184,4 @@ Right now, every successful integration overwrites the prior snapshot. For real-
 
 ---
 
-*Part 1 of a series. **Part 2 coming soon** — covers semantic gap-completeness, non-monotonic retractions, and multi-shot reasoning. Follow me on [dev.to](https://dev.to/adamrybinski) or visit [adamrybinski.com](https://adamrybinski.com/).*
+*Part 1 of a series. Continue to **[Part 2: WebILP in the browser](https://adamrybinski.com/blog/liveknowledge-part2/)** — LLM grounding, Clingo WASM, and Popper induction. Follow me on [dev.to](https://dev.to/adamrybinski) or visit [adamrybinski.com](https://adamrybinski.com/).*

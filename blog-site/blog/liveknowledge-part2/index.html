@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiveKnowledge, Part 2: WebILP in the Browser | Adam Rybinski</title>
+  <meta name="description" content="Part 2 of the LiveKnowledge series: porting merged-coherence knowledge extraction and Popper ILP induction to the browser with WebILP — Clingo WASM, Trealla, and a human-in-the-loop workflow.">
+  <link rel="canonical" href="https://adamrybinski.com/blog/liveknowledge-part2/">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
+  <meta property="og:title" content="LiveKnowledge, Part 2: WebILP in the Browser">
+  <meta property="og:description" content="From CLI to browser: LLM grounding, Clingo WASM verification, and Popper induction in a single flow.">
+  <meta property="og:url" content="https://adamrybinski.com/blog/liveknowledge-part2/">
+  <meta property="og:image" content="https://adamrybinski.com/liveknowledge.webp">
+  <meta property="og:type" content="article">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://adamrybinski.com/liveknowledge.webp">
+  <meta name="twitter:title" content="LiveKnowledge, Part 2: WebILP in the Browser">
+  <meta name="twitter:description" content="LLM grounding + Clingo WASM + Popper induction in the browser.">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.8; color: #1a1a1a; font-size: 1.05rem; }
+    @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #e2e8f0; } a { color: #60a5fa; } }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 { font-size: 2rem; margin-bottom: 0.3rem; letter-spacing: -0.02em; }
+    h1 + p.subtitle { color: #666; font-size: 1rem; margin-top: 0.2rem; }
+    h2 { font-size: 1.4rem; margin-top: 3rem; margin-bottom: 0.6rem; }
+    h3 { font-size: 1.15rem; margin-top: 2rem; margin-bottom: 0.4rem; }
+    blockquote { border-left: 3px solid #94a3b8; margin: 1.5rem 0; padding: 0.5rem 1.2rem; color: #64748b; font-style: italic; }
+    @media (prefers-color-scheme: dark) { blockquote { color: #94a3b8; border-color: #475569; } }
+    code { background: #f1f5f9; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+    @media (prefers-color-scheme: dark) { code { background: #1e293b; } }
+    pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2.5rem 0; }
+    ul, ol { padding-left: 1.3rem; margin: 0.8rem 0; }
+    li { margin-bottom: 0.5rem; }
+    .diagram { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0; font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.6; white-space: pre; overflow-x: auto; }
+    @media (prefers-color-scheme: dark) { .diagram { background: #0f172a; border-color: #1e293b; } }
+    .series-nav { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.9rem 1.1rem; margin: 0 0 1.5rem; font-size: 0.92rem; }
+    @media (prefers-color-scheme: dark) { .series-nav { background: #0f172a; border-color: #1e293b; } }
+    .series-nav strong { display: block; margin-bottom: 0.35rem; }
+    .footer { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-top: 3rem; border-top: 1px solid #e2e8f0; padding-top: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+
+  <nav class="series-nav" aria-label="LiveKnowledge series">
+    <strong>LiveKnowledge series</strong>
+    <a href="/blog/liveknowledge/">← Part 1: Architecture</a>
+    &nbsp;·&nbsp;
+    <strong>Part 2: WebILP in the browser</strong> (you are here)
+  </nav>
+
+  <p style="color:#666; font-size:0.9rem; margin-bottom:1.5rem;"><a href="/">Adam Rybinski</a> &middot; <a href="/work-with-me/"><strong>Work with me</strong></a></p>
+
+  <h1>LiveKnowledge, Part 2: WebILP in the Browser</h1>
+  <p class="subtitle">From CLI knowledge loops to a browser workflow — LLM grounding, Clingo WASM, and Popper induction</p>
+
+  <p>In <a href="/blog/liveknowledge/">Part 1</a>, I described the <a href="https://github.com/adamrybinski/LiveKnowledge">LiveKnowledge</a> architecture: an LLM proposes facts, Clingo verifies merged coherence (<code>kb ⊕ candidate</code>), and a human closes the hermeneutic loop when predicates drift or gaps are wrong.</p>
+
+  <p>That system lives on the command line. This post is about what happens when you move the same <em>shape</em> of loop into the browser — and add <strong>inductive rule learning</strong> on top.</p>
+
+  <p>The result is <a href="https://github.com/adamrybinski/webilp"><strong>WebILP</strong></a>: a single-page app that runs Popper’s Alan encoding via <a href="https://github.com/domoritz/clingo-wasm">Clingo WASM</a>, tests candidates with <a href="https://github.com/guregu/trealla-js">Trealla Prolog</a>, and uses an OpenAI-compatible LLM API for the LiveKnowledge-style grounding steps.</p>
+
+  <hr>
+
+  <h2>Why move to the web?</h2>
+
+  <p>LiveKnowledge v2.1 is powerful, but it asks you to think like an engineer: edit <code>kb.lp</code>, run <code>learn</code>, inspect gap JSON, re-ask. That is the right trade-off for automation and reproducibility.</p>
+
+  <p>For exploration — especially when pairing an LLM with symbolic checks — a browser UI wins on three counts:</p>
+
+  <ul>
+    <li><strong>Immediate feedback</strong> — you see bk, bias, and exs change as the LLM works; you do not wait for a terminal log.</li>
+    <li><strong>Human-in-the-loop by layout</strong> — review and feedback are not a separate CLI flag; they are step 3 in the flow.</li>
+    <li><strong>Zero install for demos</strong> — <code>npm start</code> serves static files; Clingo and Trealla load from CDN. No Python venv, no local Clingo binary.</li>
+  </ul>
+
+  <p>WebILP is not a replacement for the full LiveKnowledge CLI. It is a <strong>browser port of the ideas</strong> plus a Popper induction path the CLI does not cover.</p>
+
+  <hr>
+
+  <h2>The WebILP workflow</h2>
+
+  <p>The UI is a five-step flow graph. Each step has a job; arrows show where to go next and where you can loop back.</p>
+
+  <div class="diagram">
+1. SOURCE          prose / domain description
+        ↓
+2. GROUND (LLM)    Draft layer  — bk + bias + exs from scratch
+        │            Extract facts → bk  — LiveKnowledge verify + merge
+        ↓            (spinner / ✓ / ✕ on the connector)
+3. REVIEW          edit bk, bias, exs · human feedback · refine · suggest exs
+        ↓
+4. INDUCE          Clingo enumerates rules · Trealla tests coverage
+        ↓
+5. RESULT          learned rule · pin to bk · repeat
+  </div>
+
+  <h3>Step 2: what “ground with LLM” means</h3>
+
+  <p>Two buttons, two purposes — do not confuse them:</p>
+
+  <table>
+    <tr>
+      <th>Action</th>
+      <th>When to use it</th>
+      <th>What it does</th>
+    </tr>
+    <tr>
+      <td><strong>Draft layer</strong></td>
+      <td>Starting from prose only</td>
+      <td>LLM writes all three Popper files: <code>bk.pl</code> (facts), <code>bias.pl</code> (search space), <code>exs.pl</code> (pos/neg supervision)</td>
+    </tr>
+    <tr>
+      <td><strong>Extract facts → bk</strong></td>
+      <td>You already have bias/exs and need more background</td>
+      <td>LLM proposes ASP facts; Clingo WASM checks <code>bk ⊕ candidate</code> is satisfiable — same merged-coherence invariant as LiveKnowledge’s <code>verify_candidate_knowledge</code></td>
+    </tr>
+  </table>
+
+  <p>Between steps 2 and 3, a <strong>grounding connector</strong> shows live status: spinner while the LLM runs, green check on success, red X on failure. Click it to expand a timestamped log (waiting for model, parsing JSON, Clingo verify, errors with raw snippets).</p>
+
+  <h3>Step 3: the hermeneutic loop, visualised</h3>
+
+  <p>Part 1 introduced <code>target_review.drop</code> as the CLI hook for human judgement. WebILP surfaces the same idea as a <strong>feedback textarea</strong> plus <strong>Refine from feedback</strong>: the LLM revises bk, bias, and exs from your comment. <strong>Suggest more examples</strong> appends pos/neg lines when coverage is thin.</p>
+
+  <p>The machine handles syntax and consistency checks; you supply meaning.</p>
+
+  <h3>Step 4–5: induction and pinning</h3>
+
+  <p><strong>Induce</strong> is where WebILP goes beyond LiveKnowledge:</p>
+
+  <ol>
+    <li>Parse <code>bias.pl</code> → build Popper’s Alan ASP encoding</li>
+    <li>Clingo WASM enumerates candidate rule bodies (up to your model budget)</li>
+    <li>Trealla tests each candidate against pos/neg examples</li>
+    <li>First perfect rule wins (TP/FN/TN/FP coverage)</li>
+  </ol>
+
+  <p><strong>Add learned rule to bk</strong> pins the induced clause into background knowledge so the next round can extract more facts or induce again — a lightweight version of immutable KB snapshots, without leaving the page.</p>
+
+  <hr>
+
+  <h2>What ported from LiveKnowledge</h2>
+
+  <p>WebILP’s <code>verify-knowledge.js</code> implements the v2.1 semantic fix from Part 1: verification is on the <strong>merged</strong> program, not the candidate in isolation. A locally consistent fragment that contradicts existing facts is rejected.</p>
+
+  <p>The LLM assist path mirrors two CLI primitives:</p>
+
+  <ul>
+    <li><code>generate_knowledge</code> → <strong>Extract facts → bk</strong></li>
+    <li>Layer drafting (bk + bias + exs together) → <strong>Draft layer</strong> — optimised for Popper, not in the original CLI</li>
+  </ul>
+
+  <p>What is <em>not</em> in the browser yet (and remains CLI territory):</p>
+
+  <ul>
+    <li><code>ask</code> / answer verification loops</li>
+    <li>Gap reports and <code>learn --fill-gap</code> orchestration</li>
+    <li>Abductive revise on verification failure</li>
+    <li>Arity-drift resolution reporting</li>
+  </ul>
+
+  <p>Those are the “Part 3+” features if we wire the full LiveKnowledge orchestrator behind the same UI.</p>
+
+  <hr>
+
+  <h2>Browser constraints (honest limits)</h2>
+
+  <p>Clingo WASM is reliable with Popper’s single-clause <code>alan.pl</code> encoding. The browser build does <strong>not</strong> run full Popper CLI features:</p>
+
+  <table>
+    <tr>
+      <th>Feature</th>
+      <th>WebILP (browser)</th>
+      <th>Popper CLI</th>
+    </tr>
+    <tr>
+      <td>Single-clause rules</td>
+      <td>yes</td>
+      <td>yes</td>
+    </tr>
+    <tr>
+      <td><code>max_clauses &gt; 1</code>, PI, recursion (<code>alan-old.pl</code>)</td>
+      <td>no</td>
+      <td>yes</td>
+    </tr>
+    <tr>
+      <td>Nogood learning / CEGIS loop inside Popper</td>
+      <td>no (enumerate + test)</td>
+      <td>yes</td>
+    </tr>
+  </table>
+
+  <p>For game-rule layers with predicate invention or multiple clauses, export the layer and run <code>helpers/induce.sh</code> in your Popper project. WebILP is the fast path for single-clause discovery and LiveKnowledge-style fact grounding.</p>
+
+  <hr>
+
+  <h2>Try it</h2>
+
+  <pre>git clone https://github.com/adamrybinski/webilp.git
+cd webilp
+npm install
+npm start</pre>
+
+  <p>Open the URL <code>serve</code> prints (usually <code>http://localhost:3000</code>). Collapse <strong>Setup</strong> to add an OpenRouter or OpenAI-compatible API key (stored in <code>localStorage</code> only).</p>
+
+  <p>Suggested first run:</p>
+
+  <ol>
+    <li>Load a source-text example (e.g. <em>craft-economy</em> or <em>kinship-maternal</em>)</li>
+    <li><strong>Draft layer</strong> — watch the grounding connector</li>
+    <li>Review editors, add feedback if needed, <strong>Refine</strong></li>
+    <li><strong>Induce rule</strong> — inspect coverage in the result panel</li>
+    <li><strong>Add learned rule to bk</strong> and iterate</li>
+  </ol>
+
+  <p>Or skip the LLM: <strong>Setup → Load Popper example → grandparent-maternal → Induce</strong> to see pure symbolic induction with no API key.</p>
+
+  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.2rem; margin:1.5rem 0; text-align:center;">
+    <p style="font-size:1rem; font-weight:600; margin-bottom:0.5rem;">WebILP on GitHub</p>
+    <p style="font-size:0.9rem; color:#64748b; margin-bottom:0.8rem;">Browser ILP + LiveKnowledge-style grounding. Issues and PRs welcome.</p>
+    <a href="https://github.com/adamrybinski/webilp" style="display:inline-block; background:#2563eb; color:#fff; padding:0.6rem 1.4rem; border-radius:6px; font-weight:600; font-size:0.95rem;">github.com/adamrybinski/webilp →</a>
+  </div>
+
+  <hr>
+
+  <h2>What’s next</h2>
+
+  <p>Part 1 deferred semantic gap-completeness, non-monotonic retractions, and multi-shot Clingo. WebILP defers them too — but it adds something the CLI never had: <strong>interactive induction</strong> in the same session as knowledge extraction.</p>
+
+  <p>The natural merge path: gap reports from <code>ask</code> pre-fill step 2’s extract targets; failed induces feed back into suggest-examples; pinning rules updates the same KB snapshot LiveKnowledge persists on disk.</p>
+
+  <p>Until then, use the CLI for full orchestration and WebILP for exploration, demos, and the bk → bias → exs → rule loop in one tab.</p>
+
+  <hr>
+
+  <div class="footer">
+    <a href="/">Adam Rybinski</a> &mdash; <a href="https://linkedin.com/in/adam-rybinski">LinkedIn</a> &mdash; <a href="https://github.com/adamrybinski/LiveKnowledge">LiveKnowledge</a> &mdash; <a href="https://github.com/adamrybinski/webilp">WebILP</a><br>
+    <span style="font-size:0.8rem;"><a href="/blog/liveknowledge/">← Part 1: Architecture</a> &middot; Part 2: WebILP in the browser</span>
+  </div>
+
+</body>
+</html>
