@@ -1,0 +1,20 @@
+#
+# Cloudflare Pages configuration for the main site deployment.
+#
+# Project: adamrybinski-com
+# Deploy from this directory (static HTML/CSS/JS): blog-site/
+#
+# Usage:
+#   cd blog-site
+#   wrangler pages deploy . --project-name adamrybinski-com
+#
+# Notes:
+# - This repo is a static site (no build step). The output directory is '.'.
+# - Authentication is handled by `wrangler login`.
+#
+
+name = "adamrybinski-com"
+
+# Wrangler v4 Pages static output directory.
+pages_build_output_dir = "."
+

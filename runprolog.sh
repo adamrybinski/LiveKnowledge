@@ -1,0 +1,1 @@
+swipl -s liveknowledge.pl -g "hello_world, halt."

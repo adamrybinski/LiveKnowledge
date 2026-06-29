@@ -51,6 +51,17 @@ echo "DEFAULT_MAX_ITERATIONS=3" >> .env
 
 ## Usage
 
+## Website / Pages deploy (adamrybinski-com)
+
+The static site lives in `blog-site/` and is deployed to **Cloudflare Pages** under the project **`adamrybinski-com`**.
+
+```bash
+cd blog-site
+wrangler pages deploy . --project-name adamrybinski-com
+```
+
+The Pages settings are documented in `blog-site/wrangler.toml`.
+
 ### `ask` — Answer a question against the knowledge base
 
 ```bash
